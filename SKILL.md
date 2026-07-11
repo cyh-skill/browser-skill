@@ -1,5 +1,5 @@
 ---
-name: browser-skill
+name: cyh-browser-skill
 license: MIT
 github: https://github.com/cyh-skill/browser-skill
 description:
