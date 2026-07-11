@@ -1,17 +1,17 @@
 name: Release Extension
 
-# 自动发布浏览器扩展到 Releases：
-#   - 改动 extension/**（尤其是 manifest.json 里的 version）推到 main 即自动打包发版
-#   - 也可在 Actions 页手动 Run workflow
-# 版本号取自 extension/manifest.json 的 version 字段，tag 形如 v1.0.0。
-# 若对应 tag 的 Release 已存在则跳过（想重新发布就先 bump 版本号）。
+# 自动发布浏览器扩展到 Releases，版本号自动递增：
+#   - 改动 extension/** 推到 main（或手动 Run workflow）即触发
+#   - major.minor 取自 extension/manifest.json 的 version 字段
+#   - patch 自动递增：找现有最大的 vMAJOR.MINOR.x 再 +1；没有则用 manifest 里的 patch
+#   - 递增后的版本只注入到打进 zip 的 manifest（不回写仓库，避免触发循环）
+# 想升 minor/major：手动把 manifest.json 的 version 改成 1.1.0 之类，CI 会从新号段继续自增。
 
 on:
   push:
     branches: [main]
     paths:
       - 'extension/**'
-      - '.github/workflows/release-extension.yml'
   workflow_dispatch:
 
 permissions:
@@ -20,34 +20,42 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Read version from manifest
+      - name: Compute next version
         id: meta
         run: |
-          VERSION=$(jq -r '.version' extension/manifest.json)
-          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+          set -euo pipefail
+          MAJOR=$(jq -r '.version | split(".")[0]' extension/manifest.json)
+          MINOR=$(jq -r '.version | split(".")[1] // "0"' extension/manifest.json)
+          MPATCH=$(jq -r '.version | split(".")[2] // "0"' extension/manifest.json)
+          if [ -z "$MAJOR" ] || [ "$MAJOR" = "null" ]; then
             echo "::error::extension/manifest.json 里没有读到 version" && exit 1
           fi
+          ESC="v${MAJOR}\.${MINOR}\."
+          MAXP=$(gh api "repos/${GITHUB_REPOSITORY}/tags" --paginate -q '.[].name' \
+            | grep -E "^${ESC}[0-9]+$" \
+            | sed -E "s/^${ESC}//" \
+            | sort -n | tail -1 || true)
+          if [ -z "${MAXP:-}" ]; then
+            NEXTP="$MPATCH"
+          else
+            NEXTP=$((MAXP + 1))
+          fi
+          VERSION="${MAJOR}.${MINOR}.${NEXTP}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "下一个版本：v$VERSION"
 
-      - name: Check if release already exists
-        id: check
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Inject version & package
         run: |
-          if gh release view "${{ steps.meta.outputs.tag }}" >/dev/null 2>&1; then
-            echo "已存在 Release ${{ steps.meta.outputs.tag }}，跳过（改 version 后再触发）"
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Package extension
-        if: steps.check.outputs.exists == 'false'
-        run: |
+          set -euo pipefail
+          tmp=$(mktemp)
+          jq --arg v "${{ steps.meta.outputs.version }}" '.version=$v' extension/manifest.json > "$tmp"
+          mv "$tmp" extension/manifest.json
           ZIP="browser-skill-extension-${{ steps.meta.outputs.tag }}.zip"
           cd extension
           zip -r "../$ZIP" . -x "*.DS_Store" -x "__MACOSX/*"
@@ -56,7 +64,6 @@ jobs:
           unzip -l "$ZIP"
 
       - name: Create Release
-        if: steps.check.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
