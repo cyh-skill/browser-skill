@@ -1,9 +1,9 @@
 # 浏览器操作 HTTP API 参考
 
 两条连接通道（CDP-proxy / 扩展桥）暴露**同一套** HTTP API，地址默认 `http://localhost:3456`。
-本文档以通道 A（CDP-proxy）为准；通道 B 支持其中的浏览命令子集（不含 `/net/*`），见 `connection-channels.md`。
+**启动统一走 `node scripts/bridge.mjs`（自动探测通道）**；本文档以通道 A（CDP-proxy）的 HTTP API 为准，通道 B 支持其中的浏览命令子集（不含 `/net/*`），见 `connection-channels.md`。
 
-- 启动（通道 A）：`node ${CLAUDE_SKILL_DIR}/scripts/cdp-proxy.mjs &`（Agent 一般由 check-deps 自动管理）
+- 启动：统一入口 `node scripts/bridge.mjs`（自动探测择优）；强制通道 A / 调试可直起 `node ${CLAUDE_SKILL_DIR}/scripts/cdp-proxy.mjs &`（Agent 一般由 check-deps 自动管理）
 - 强制停止：`pkill -f cdp-proxy.mjs`
 - 环境变量：`CDP_PROXY_PORT`（默认 3456）、`CDP_TAB_IDLE_TIMEOUT`（托管 tab 闲置回收毫秒，默认 900000）
 

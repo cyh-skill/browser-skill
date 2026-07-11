@@ -18,21 +18,21 @@ metadata:
 
 一个融合型浏览器操作 skill。核心是**直连你的日常浏览器**（Chrome / Edge / Chromium 系），天然携带登录态，像人一样完成联网任务。
 
-提供两条连接通道，HTTP API 完全一致，任务里的调用与通道无关：
+由 `bridge.mjs` 统一入口自动探测、择优连接通道（可用 `--channel` 强制），两条通道 HTTP API 完全一致，任务里的调用与通道无关：
 
-| 通道 | 连接方式 | 何时用 |
+| 通道 | 连接方式 | 能力 |
 |------|----------|--------|
-| **A · CDP-proxy**（默认，已充分验证） | `chrome://inspect` 远程调试开关 + Node WebSocket 直连 | 日常首选。支持全部能力（含网络拦截） |
-| **B · 扩展桥**（可选，实验性） | 未打包扩展 `chrome.debugger` + Node WS 桥 | 不想开调试开关、或想要真·彩色标签组做会话隔离时。见 `extension/README.md` |
+| **A · CDP-proxy**（回退默认，已充分验证） | 需开 `chrome://inspect` 远程调试开关，经 cdp + Node WebSocket 直连 | 全部能力（含 `/net/*` 网络拦截） |
+| **B · 扩展桥**（有扩展时优先，实验性） | 未打包扩展 `chrome.debugger` + Node WS 桥 | 免开调试开关、真·彩色标签组；有黄色“正在调试此浏览器”提示条；无 `/net/*`。见 `extension/README.md` |
 
 ---
 
 ## 前置检查
 
-在开始联网操作前，先检查通道 A（CDP-proxy）可用性：
+在开始联网操作前，先跑统一入口 `bridge.mjs`，它会自动探测并择优通道（有扩展走通道 B，否则自动回退通道 A · CDP）：
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs"
+node "${CLAUDE_SKILL_DIR}/scripts/bridge.mjs"
 ```
 
 **Node.js 22+** 必需（使用原生 WebSocket）。
@@ -42,9 +42,9 @@ node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs"
 - `exit 2` → 需询问用户偏好，写入 `${CLAUDE_SKILL_DIR}/config.env` 的 `BROWSER_SKILL_BROWSER`
 - `exit 1` → 按 stdout 错误信息处理。若提示包含「Agent 处理顺序」，按其步骤执行（如先用系统命令打开浏览器后重跑），自动可解则不打扰用户；仍失败再向用户求助
 
-支持参数 `--browser <chrome|edge>` 表达本次临时覆盖（不写 config.env）。切换浏览器时先 `pkill -f cdp-proxy.mjs` 再重跑。
+支持参数 `--browser <id>`（chrome/edge/… 透传通道 A，本次临时覆盖，不写 config.env）；想固定某通道用 `--channel auto|ext|cdp`（默认 auto）、扩展探测超时 `--ext-wait <ms>`（默认 2000）。切换浏览器时先停掉对应通道的桥、再重跑 `bridge.mjs`——通道 A `pkill -f cdp-proxy.mjs`，通道 B `pkill -f ext-bridge.mjs`。
 
-> 用通道 B 时改为启动 `node "${CLAUDE_SKILL_DIR}/scripts/ext-bridge.mjs"` 并加载扩展，详见 `extension/README.md`。
+> 默认自动探测：`bridge.mjs` 探到扩展即走通道 B，否则回退通道 A。想用扩展特性（免开调试开关、彩色标签组）时，先在浏览器加载 `extension/` 未打包扩展，`bridge.mjs` 探到即自动走通道 B，或用 `--channel ext` 强制。详见 `extension/README.md` 与 `references/connection-channels.md`。
 
 检查通过后必须在回复中向用户直接展示以下须知，再执行操作：
 

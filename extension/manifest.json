@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "browser-skill bridge",
   "version": "1.0.0",
-  "description": "把 Agent 的命令桥接到本地浏览器：chrome.debugger 驱动 + chrome.tabGroups 彩色会话隔离。配合 scripts/ext-bridge.mjs 使用。",
+  "description": "把 Agent 的命令桥接到本地浏览器：chrome.debugger 驱动 + chrome.tabGroups 彩色会话隔离。由 scripts/bridge.mjs 统一调度（有扩展走扩展，无扩展自动回退 CDP 通道 A）。",
   "permissions": ["debugger", "tabs", "tabGroups", "alarms", "scripting"],
   "host_permissions": ["<all_urls>"],
   "background": {

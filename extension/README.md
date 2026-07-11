@@ -7,7 +7,7 @@
 - ⚠️ 会触发 Chrome 顶部「"browser-skill bridge" 正在调试此浏览器」提示条（`chrome.debugger` 的固有行为，chrome-use 同理）
 - ⚠️ **实验性**：Node 侧的 WS 桥已通过端到端测试；扩展本体（`background.js`）需你在自己的浏览器加载后自测
 
-> 日常首选通道 A（已充分验证、支持网络拦截等全部能力）。只有当你不想开调试开关、或想要彩色标签组时才用通道 B。二者共用 3456 端口，**同一时间只运行一个**。
+> 通常直接用统一入口 `node scripts/bridge.mjs` 自动探测：加载了本扩展就会自动走通道 B，没加载则自动回退通道 A。通道 B 仍与通道 A 二选一、同占 3456 端口，**同一时间只运行一个**。
 
 ## 安装
 
@@ -17,8 +17,13 @@
 
 ## 运行
 
+> 前提：先按上面「安装」把本扩展加载进浏览器（load unpacked），否则探测不到会回退通道 A。
+
 ```bash
-# 启动 Node 侧桥（HTTP API 3456 ⇄ WS 3458）
+# 首选：统一入口，探到本扩展后会自动起 ext-bridge 走通道 B
+node scripts/bridge.mjs
+
+# 手动 / 强制通道 B 的等价方式（直接起 Node 侧桥，HTTP API 3456 ⇄ WS 3458）
 node scripts/ext-bridge.mjs
 
 # 扩展后台会自动连上；确认：

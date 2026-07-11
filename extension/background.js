@@ -49,7 +49,8 @@ function send(obj) {
 
 function scheduleReconnect() {
   if (reconnectTimer) return;
-  reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, 1500);
+  // 800ms 快速重连：让 bridge.mjs 的探测窗口能可靠抓到扩展，断连后也能更快恢复
+  reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, 800);
 }
 
 // MV3 service worker 会闲置回收：用 alarm 定期唤醒并保活/重连
