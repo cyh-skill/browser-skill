@@ -1,0 +1,74 @@
+name: Release Extension
+
+# 自动发布浏览器扩展到 Releases：
+#   - 改动 extension/**（尤其是 manifest.json 里的 version）推到 main 即自动打包发版
+#   - 也可在 Actions 页手动 Run workflow
+# 版本号取自 extension/manifest.json 的 version 字段，tag 形如 v1.0.0。
+# 若对应 tag 的 Release 已存在则跳过（想重新发布就先 bump 版本号）。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'extension/**'
+      - '.github/workflows/release-extension.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version from manifest
+        id: meta
+        run: |
+          VERSION=$(jq -r '.version' extension/manifest.json)
+          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+            echo "::error::extension/manifest.json 里没有读到 version" && exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check if release already exists
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.meta.outputs.tag }}" >/dev/null 2>&1; then
+            echo "已存在 Release ${{ steps.meta.outputs.tag }}，跳过（改 version 后再触发）"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Package extension
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          ZIP="browser-skill-extension-${{ steps.meta.outputs.tag }}.zip"
+          cd extension
+          zip -r "../$ZIP" . -x "*.DS_Store" -x "__MACOSX/*"
+          cd ..
+          echo "打包完成：$ZIP"
+          unzip -l "$ZIP"
+
+      - name: Create Release
+        if: steps.check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: browser-skill extension ${{ steps.meta.outputs.tag }}
+          files: browser-skill-extension-${{ steps.meta.outputs.tag }}.zip
+          body: |
+            浏览器扩展桥接（Manifest V3 · chrome.debugger 驱动 · 彩色会话隔离）。
+
+            ### 安装（加载已解压的扩展）
+            1. 下载并解压下方的 `browser-skill-extension-${{ steps.meta.outputs.tag }}.zip`
+            2. 打开 `chrome://extensions`，开启右上角「开发者模式」
+            3. 点「加载已解压的扩展程序」，选择解压出来的文件夹
+            4. 按 skill README 启动本地桥接脚本（`scripts/ext-bridge.mjs`）
+
+            > 提示：Chrome 不支持直接安装 zip / crx，非商店扩展需用「加载已解压」方式，必须先解压再选文件夹。
