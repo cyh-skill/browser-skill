@@ -9,7 +9,8 @@
 // 用法：
 //   node scripts/bridge.mjs [--browser <id>] [--channel auto|ext|cdp] [--ext-wait <ms>]
 //     --browser <id>   透传给通道 A（chrome/chrome-canary/chromium/edge）
-//     --channel        auto(默认) / ext(强制扩展) / cdp(强制 CDP)
+//     --channel        auto(默认,探到扩展走 B、否则回退 A) / ext(强制扩展) / cdp(强制 CDP)
+//                      显式 ext/cdp 时，若在跑的是另一条通道会自动停掉它并切换；auto 则复用在跑实例、不打扰
 //     --ext-wait <ms>  探测扩展的等待时长（默认 2000）
 // 环境变量：
 //   CDP_PROXY_PORT   (默认 3456)  HTTP API 端口
@@ -21,7 +22,7 @@
 
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -129,6 +130,27 @@ async function startExtBridge() {
   process.exit(1);
 }
 
+// 通道 -> /health 的 channel 字段
+const CHANNEL_HEALTH = { ext: 'ext-bridge', cdp: 'cdp-proxy' };
+
+// 停掉指定通道的桥，等 HTTP_PORT 释放（用于显式 --channel 切换）
+function stopChannel(runningChannel) {
+  return new Promise((resolve) => {
+    const pat = runningChannel === 'ext-bridge' ? 'ext-bridge.mjs'
+      : runningChannel === 'cdp-proxy' ? 'cdp-proxy.mjs' : null;
+    if (!pat) return resolve();
+    execFile('pkill', ['-f', pat], async () => {
+      const start = Date.now();
+      while (Date.now() - start < 6000) {
+        await sleep(300);
+        if (!(await getHealth(HTTP_PORT, 400))) { log(`已停「${runningChannel}」，:${HTTP_PORT} 已释放`); return resolve(); }
+      }
+      warn(`停「${runningChannel}」后 :${HTTP_PORT} 仍被占用（可能有残留进程），继续尝试启动新通道`);
+      resolve();
+    });
+  });
+}
+
 // 通道 A：委派 check-deps（浏览器发现 + 起 cdp-proxy + 退出码语义全保留）
 function startCdp(args) {
   const script = path.join(SCRIPT_DIR, 'check-deps.mjs');
@@ -142,16 +164,22 @@ function startCdp(args) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
 
-  // 1) 已有健康实例 → 复用（幂等，重复启动安全）
+  // 1) 已有健康实例：auto 或 请求通道==在跑通道 → 复用（不打扰）；显式指定了另一通道 → 切换
   const existing = await getHealth(HTTP_PORT);
   if (existing && existing.status === 'ok') {
-    const ch = existing.channel || 'unknown';
-    if (ch === 'ext-bridge' && existing.connected === false) {
-      warn(`已有通道 B 实例在 :${HTTP_PORT} 但扩展未连接。请在浏览器加载 extension/，或先停掉它再用 --channel cdp。`);
-    } else {
-      log(`已有实例在 :${HTTP_PORT}（通道=${ch}, connected=${existing.connected}），直接复用。`);
+    const running = existing.channel || 'unknown';   // 'ext-bridge' | 'cdp-proxy'
+    const wantHealth = CHANNEL_HEALTH[args.channel];  // 显式 ext/cdp 对应的 channel；auto 为 undefined
+    if (args.channel === 'auto' || wantHealth === running) {
+      if (running === 'ext-bridge' && existing.connected === false) {
+        warn(`已有通道 B 实例在 :${HTTP_PORT} 但扩展未连接。请在浏览器加载 extension/，或用 --channel cdp 切到通道 A。`);
+      } else {
+        log(`已有实例在 :${HTTP_PORT}（通道=${running}, connected=${existing.connected}），直接复用。`);
+      }
+      process.exit(0);
     }
-    process.exit(0);
+    // 显式指定了另一条通道 → 停掉在跑的，切过去
+    log(`当前在跑通道「${running}」，按 --channel ${args.channel} 切换：先停掉它…`);
+    await stopChannel(running);
   }
 
   // 2) 定通道

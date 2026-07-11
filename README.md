@@ -41,7 +41,7 @@ git clone https://github.com/cyh-skill/browser-skill ~/.claude/skills/browser-sk
 
 ## 前置配置
 
-需要 **Node.js 22+**。通道 A（默认）需浏览器开启远程调试开关：
+需要 **Node.js 22+**。默认走通道 B（加载 `extension/` 未打包扩展即用，免开下列开关）；**通道 A**（能力回退，需 `/net/*`·`/setFiles` 时）需浏览器开启远程调试开关：
 
 1. 浏览器地址栏打开 `chrome://inspect/#remote-debugging`（Edge 为 `edge://inspect/#remote-debugging`）
 2. 勾选 **Allow remote debugging for this browser instance**（可能需重启浏览器）
@@ -61,12 +61,12 @@ node ~/.claude/skills/browser-skill/scripts/bridge.mjs
 
 ## 两条连接通道
 
-由 `bridge.mjs` 统一入口自动选（有扩展走 B，否则回退 A；可用 `--channel auto|ext|cdp` 强制）：
+由 `bridge.mjs` 统一入口自动选（探到扩展走 B，否则回退 A；可用 `--channel auto|ext|cdp` 强制）。**默认走最不打扰的通道 B**，仅能力不足时回退/切通道 A：
 
 | 通道 | 连接 | 何时用 |
 |------|------|--------|
-| **A · CDP-proxy**（默认，回退项） | `chrome://inspect` 开关 + Node 直连 | 支持全部能力（含 `/net/*` 网络拦截）。已端到端验证 |
-| **B · 扩展桥**（实验性） | 未打包扩展 `chrome.debugger` + Node WS 桥 | 免开调试开关、想要真·彩色标签组时。见 [`extension/README.md`](extension/README.md) |
+| **B · 扩展桥**（默认推荐，最不打扰） | 未打包扩展 `chrome.debugger` + Node WS 桥 | 加载 `extension/` 即用：免开调试开关、不问选哪个浏览器、天然登录态、真·彩色标签组。见 [`extension/README.md`](extension/README.md) |
+| **A · CDP-proxy**（能力回退，已验证） | `chrome://inspect` 开关 + Node 直连 | 未装扩展，或需要通道 B 不具备的能力（`/net/*` 网络拦截、`/setFiles`）时 |
 
 两条通道 HTTP API 完全一致（同一套 `http://127.0.0.1:3456`），任务里的调用与通道无关。详见 [`references/connection-channels.md`](references/connection-channels.md)。
 

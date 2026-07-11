@@ -1,7 +1,7 @@
 {
   "name": "browser-skill",
   "description": "融合型浏览器操作 skill：直连日常浏览器（登录态）+ 多会话隔离 + 拟人输入 + 网络拦截 + 结构化站点适配器。融合 web-access(CDP 底座) 与 chrome-use(能力思路)。",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": {
     "name": "cyh-skill"
   },

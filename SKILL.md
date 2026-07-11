@@ -8,7 +8,7 @@ description:
   普通联网搜索与静态网页抓取优先用内置 WebSearch / WebFetch；只有被登录墙挡、内容靠 JS 渲染、需要模拟真人交互时才用本 skill。
 metadata:
   author: cyh (cyh-skill)
-  version: "1.1.0"
+  version: "1.2.0"
   based_on:
     - "web-access (一泽Eze, MIT) — CDP-proxy 底座、浏览哲学、站点经验体系"
     - "chrome-use (leeguooooo, Apache-2.0) — 多会话隔离 / 拟人输入 / 网络拦截 / 扩展桥 的思路"
@@ -18,18 +18,18 @@ metadata:
 
 一个融合型浏览器操作 skill。核心是**直连你的日常浏览器**（Chrome / Edge / Chromium 系），天然携带登录态，像人一样完成联网任务。
 
-由 `bridge.mjs` 统一入口自动探测、择优连接通道（可用 `--channel` 强制），两条通道 HTTP API 完全一致，任务里的调用与通道无关：
+由 `bridge.mjs` 统一入口自动探测、择优连接通道（`auto`：探到扩展走 B、否则回退 A；可用 `--channel` 强制）。**默认走最不打扰的通道 B**——在浏览器加载 `extension/` 未打包扩展即用（免开调试开关、不问你选哪个浏览器、天然登录态）；仅当能力不足（需 `/net/*` 网络拦截、`/setFiles`）时才回退/切到通道 A。两条通道 HTTP API 完全一致，任务里的调用与通道无关：
 
 | 通道 | 连接方式 | 能力 |
 |------|----------|--------|
-| **A · CDP-proxy**（回退默认，已充分验证） | 需开 `chrome://inspect` 远程调试开关，经 cdp + Node WebSocket 直连 | 全部能力（含 `/net/*` 网络拦截） |
-| **B · 扩展桥**（有扩展时优先，实验性） | 未打包扩展 `chrome.debugger` + Node WS 桥 | 免开调试开关、真·彩色标签组；有黄色“正在调试此浏览器”提示条；无 `/net/*`。见 `extension/README.md` |
+| **B · 扩展桥**（默认推荐，最不打扰） | 加载 `extension/` 未打包扩展，`chrome.debugger` + Node WS 桥 | 免开调试开关、不问选哪个浏览器、天然登录态、真·彩色标签组；有黄色“正在调试此浏览器”提示条；无 `/net/*`。见 `extension/README.md` |
+| **A · CDP-proxy**（能力回退，需 `/net/*`·`/setFiles` 时；已充分验证） | 需开 `chrome://inspect` 远程调试开关，经 cdp + Node WebSocket 直连 | 全部能力（含 `/net/*` 网络拦截、`/setFiles`） |
 
 ---
 
 ## 前置检查
 
-在开始联网操作前，先跑统一入口 `bridge.mjs`，它会自动探测并择优通道（有扩展走通道 B，否则自动回退通道 A · CDP）：
+在开始联网操作前，先跑统一入口 `bridge.mjs`，它会自动探测并择优通道（探到扩展走通道 B，否则回退通道 A · CDP）。**推荐先在浏览器加载 `extension/` 未打包扩展，这样默认走最不打扰的通道 B**（免开调试开关、不问选哪个浏览器、天然登录态）：
 
 ```bash
 node "${CLAUDE_SKILL_DIR}/scripts/bridge.mjs"
@@ -44,7 +44,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/bridge.mjs"
 
 支持参数 `--browser <id>`（chrome/edge/… 透传通道 A，本次临时覆盖，不写 config.env）；想固定某通道用 `--channel auto|ext|cdp`（默认 auto）、扩展探测超时 `--ext-wait <ms>`（默认 2000）。切换浏览器时先停掉对应通道的桥、再重跑 `bridge.mjs`——通道 A `pkill -f cdp-proxy.mjs`，通道 B `pkill -f ext-bridge.mjs`。
 
-> 默认自动探测：`bridge.mjs` 探到扩展即走通道 B，否则回退通道 A。想用扩展特性（免开调试开关、彩色标签组）时，先在浏览器加载 `extension/` 未打包扩展，`bridge.mjs` 探到即自动走通道 B，或用 `--channel ext` 强制。详见 `extension/README.md` 与 `references/connection-channels.md`。
+> 默认口径：**优先通道 B**——先在浏览器加载 `extension/` 未打包扩展，`bridge.mjs` 探到即自动走通道 B（最不打扰）；未装扩展则回退通道 A。仅当需要通道 B 不具备的能力（`/net/*` 网络拦截、`/setFiles`）时，用 `node scripts/bridge.mjs --channel cdp` 一条命令切到通道 A（显式 `--channel` 会自动停掉在跑的另一通道再切；`auto` 则复用在跑实例、不打扰）。详见 `extension/README.md` 与 `references/connection-channels.md`。
 
 检查通过后必须在回复中向用户直接展示以下须知，再执行操作：
 
