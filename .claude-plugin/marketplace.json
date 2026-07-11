@@ -1,0 +1,18 @@
+{
+  "name": "browser-skill",
+  "owner": {
+    "name": "cyh-skill"
+  },
+  "metadata": {
+    "description": "Fusion browser-automation skill for Claude Code / agents"
+  },
+  "plugins": [
+    {
+      "name": "browser-skill",
+      "description": "直连日常浏览器操作：登录态抓取、页面交互、多会话隔离、拟人输入、网络拦截、结构化站点适配器",
+      "source": "./",
+      "category": "productivity",
+      "tags": ["web", "browser", "cdp", "automation", "scraping"]
+    }
+  ]
+}

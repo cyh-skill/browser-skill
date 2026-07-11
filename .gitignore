@@ -1,0 +1,7 @@
+# 用户偏好（首次运行从 templates/config.env.template 生成）
+config.env
+
+# 运行时产物
+*.log
+node_modules/
+.DS_Store

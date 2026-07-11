@@ -1,0 +1,36 @@
+browser-skill
+Copyright (c) 2026 cyh-skill
+
+This product is a derivative / fusion work built on top of two upstream projects.
+Grateful attribution to both:
+
+────────────────────────────────────────────────────────────────────────
+1) web-access  —  https://github.com/eze-is/web-access
+   Author: 一泽Eze
+   License: MIT
+
+   browser-skill directly derives from web-access. Carried forward largely
+   as-is: the CDP-proxy architecture and HTTP API, browser auto-discovery
+   (browser-discovery.mjs), dependency check (check-deps.mjs), local
+   bookmark/history search (find-url.mjs), site-pattern matching
+   (match-site.mjs), the "browsing philosophy" and tool-selection guidance
+   in SKILL.md, and several site-pattern notes (x.com, xiaohongshu.com,
+   goofish.com, zhipin.com) and the v2.5.3 POST-body migration doc.
+
+────────────────────────────────────────────────────────────────────────
+2) chrome-use  —  https://github.com/leeguooooo/chrome-use
+   Author: leeguooooo
+   License: Apache License 2.0
+
+   Ideas incorporated (re-implemented independently in JS for this skill's
+   CDP-proxy / extension-bridge, not copied from chrome-use's Rust source):
+   multi-session isolation with colored tab groups, humanized input
+   (curved cursor trajectory + variable typing cadence), network
+   interception (block / mock / rewrite), and the browser-extension bridge
+   connection approach.
+────────────────────────────────────────────────────────────────────────
+
+Original additions by cyh-skill: the /extract structured site-adapter
+endpoint and adapters/ modules, run-adapter.mjs, the self-contained
+WebSocket server in ext-bridge.mjs, the MV3 bridge extension, and
+zhihu.com / mp.weixin.qq.com site patterns and adapters.
