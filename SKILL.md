@@ -8,7 +8,7 @@ description:
   普通联网搜索与静态网页抓取优先用内置 WebSearch / WebFetch；只有被登录墙挡、内容靠 JS 渲染、需要模拟真人交互时才用本 skill。
 metadata:
   author: cyh (cyh-skill)
-  version: "1.0.0"
+  version: "1.1.0"
   based_on:
     - "web-access (一泽Eze, MIT) — CDP-proxy 底座、浏览哲学、站点经验体系"
     - "chrome-use (leeguooooo, Apache-2.0) — 多会话隔离 / 拟人输入 / 网络拦截 / 扩展桥 的思路"
