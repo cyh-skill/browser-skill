@@ -11,6 +11,9 @@ let reconnectTimer = null;
 
 // session 名 -> tabGroupId
 const sessionGroups = {};
+const managedTabs = new Map(); // tabId -> { session, ownership: created|borrowed, lastAccessed }
+const commandTails = new Map();
+let registryLoaded = false;
 const GROUP_COLORS = ['blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'];
 function colorForSession(name) {
   let h = 0;
@@ -19,6 +22,87 @@ function colorForSession(name) {
 }
 
 function log(...a) { console.log('[bridge]', ...a); }
+
+async function ensureRegistryLoaded() {
+  if (registryLoaded) return;
+  registryLoaded = true;
+  try {
+    const stored = await chrome.storage.session.get('managedTabs');
+    const tabs = await chrome.tabs.query({});
+    const liveIds = new Set(tabs.map((tab) => tab.id));
+    for (const [tabId, meta] of stored.managedTabs || []) {
+      if (liveIds.has(Number(tabId))) managedTabs.set(Number(tabId), meta);
+    }
+    await persistRegistry();
+  } catch (e) { log('load managed registry failed', e.message); }
+}
+
+async function persistRegistry() {
+  try { await chrome.storage.session.set({ managedTabs: [...managedTabs.entries()] }); }
+  catch (e) { log('persist managed registry failed', e.message); }
+}
+
+function requireManaged(tabId, expectedSession) {
+  if (!Number.isInteger(tabId)) throw new Error('需要 target ID');
+  const meta = managedTabs.get(tabId);
+  if (!meta) throw new Error(`target ${tabId} 未被托管；先用 /new 创建，或显式调用 /borrow 借用`);
+  if (expectedSession && meta.session !== expectedSession) {
+    throw new Error(`target ${tabId} 属于 session ${meta.session}，不是 ${expectedSession}`);
+  }
+  meta.lastAccessed = Date.now();
+  return meta;
+}
+
+async function registerManaged(tabId, session, ownership) {
+  const existing = managedTabs.get(tabId);
+  if (existing && existing.session !== session) {
+    throw new Error(`target ${tabId} 已由 session ${existing.session} 托管`);
+  }
+  const meta = existing || { session, ownership, lastAccessed: Date.now() };
+  meta.lastAccessed = Date.now();
+  managedTabs.set(tabId, meta);
+  await persistRegistry();
+  return { ...meta, alreadyManaged: Boolean(existing) };
+}
+
+async function returnBorrowed(tabId) {
+  const meta = requireManaged(tabId);
+  if (meta.ownership !== 'borrowed') throw new Error(`target ${tabId} 由 Agent 创建，请用 /close 关闭`);
+  await new Promise((resolve) => chrome.debugger.detach({ tabId }, () => { void chrome.runtime.lastError; resolve(); }));
+  attached.delete(tabId);
+  managedTabs.delete(tabId);
+  await persistRegistry();
+  return { targetId: String(tabId), session: meta.session, ownership: 'borrowed', action: 'returned' };
+}
+
+function elementResolverSource(value) {
+  const encoded = JSON.stringify(String(value || '').trim());
+  return `(() => {
+    const input = ${encoded};
+    if (/^@e[1-9]\\d*$/.test(input)) {
+      const state = window[Symbol.for('cyh-browser-skill.refs.v1')];
+      return state?.refs?.get(input) || null;
+    }
+    try { return document.querySelector(input); } catch { return null; }
+  })()`;
+}
+
+async function acquireCommandKeys(keys) {
+  const normalized = [...new Set(keys.filter(Boolean))].sort();
+  const releases = [];
+  for (const key of normalized) {
+    const previous = commandTails.get(key) || Promise.resolve();
+    let releaseCurrent;
+    const current = new Promise((resolve) => { releaseCurrent = resolve; });
+    commandTails.set(key, current);
+    await previous.catch(() => {});
+    releases.push(() => {
+      releaseCurrent();
+      if (commandTails.get(key) === current) commandTails.delete(key);
+    });
+  }
+  return () => { for (const release of releases.reverse()) release(); };
+}
 
 function connect() {
   try {
@@ -80,6 +164,10 @@ function attach(tabId) {
   });
 }
 chrome.debugger.onDetach.addListener((src) => { if (src.tabId) attached.delete(src.tabId); });
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (!managedTabs.delete(tabId)) return;
+  persistRegistry().catch(() => {});
+});
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -92,7 +180,7 @@ async function evalIn(tabId, expression) {
 }
 
 async function elementCenter(tabId, selector) {
-  const js = '(() => { const el = document.querySelector(' + JSON.stringify(selector) + ');'
+  const js = '(() => { const el = ' + elementResolverSource(selector) + ';'
     + ' if (!el) return { error: "未找到元素" }; el.scrollIntoView({block:"center",inline:"center"});'
     + ' const r = el.getBoundingClientRect(); return { x: r.x + r.width/2, y: r.y + r.height/2, tag: el.tagName }; })()';
   return evalIn(tabId, js);
@@ -106,24 +194,75 @@ async function waitComplete(tabId, timeout = 15000) {
   }
 }
 
+const TARGET_COMMANDS = new Set([
+  'navigate', 'back', 'info', 'eval', 'click', 'clickAt', 'humanClick',
+  'type', 'scroll', 'screenshot',
+]);
+
 // --- 命令实现 ---
 async function handle(cmd, a) {
+  await ensureRegistryLoaded();
+  const tabId = Number(a.target);
+  const keys = [];
+  if (TARGET_COMMANDS.has(cmd) || cmd === 'close' || cmd === 'return') {
+    const meta = requireManaged(tabId, a.session);
+    keys.push(`target:${tabId}`, `session:${meta.session}`);
+  } else if (cmd === 'borrow') {
+    const requestedSession = a.session || 'default';
+    const existing = managedTabs.get(tabId);
+    if (existing && existing.session !== requestedSession) {
+      throw new Error(`target ${tabId} 已由 session ${existing.session} 托管`);
+    }
+    keys.push(`target:${tabId}`, `session:${existing?.session || requestedSession}`);
+  } else if (cmd === 'new' || cmd === 'closeSession') {
+    keys.push(`session:${a.session || 'default'}`);
+  }
+  const release = await acquireCommandKeys(keys);
+  try { return await handleUnlocked(cmd, a); } finally { release(); }
+}
+
+async function handleUnlocked(cmd, a) {
+  if (TARGET_COMMANDS.has(cmd)) requireManaged(Number(a.target), a.session);
+
   switch (cmd) {
     case 'health':
-      return { channel: 'ext-bridge', connected: true };
+      return {
+        channel: 'ext-bridge',
+        connected: true,
+        apiVersion: '1.4.0',
+        managedTabs: managedTabs.size,
+        features: ['snapshot', 'elementRefs', 'borrowReturn', 'managedGuard', 'targetQueue'],
+      };
 
     case 'list': {
       const tabs = await chrome.tabs.query({});
-      return tabs.map((t) => ({ targetId: String(t.id), url: t.url, title: t.title, session: sessionFromGroup(t.groupId) }));
+      return tabs.map((t) => {
+        const meta = managedTabs.get(t.id);
+        return {
+          targetId: String(t.id),
+          url: t.url,
+          title: t.title,
+          managed: Boolean(meta),
+          session: meta?.session || null,
+          ownership: meta?.ownership || null,
+        };
+      });
     }
 
     case 'sessions': {
       const tabs = await chrome.tabs.query({});
+      const byId = new Map(tabs.map((tab) => [tab.id, tab]));
       const groups = {};
-      for (const t of tabs) {
-        const s = sessionFromGroup(t.groupId);
-        if (!s) continue;
-        (groups[s] ||= []).push({ targetId: String(t.id), url: t.url, title: t.title });
+      for (const [tabId, meta] of managedTabs) {
+        const tab = byId.get(tabId);
+        if (!tab) continue;
+        (groups[meta.session] ||= []).push({
+          targetId: String(tabId),
+          url: tab.url,
+          title: tab.title,
+          ownership: meta.ownership,
+          lastAccessed: meta.lastAccessed,
+        });
       }
       return Object.entries(groups).map(([session, tabs]) => ({ session, count: tabs.length, tabs }));
     }
@@ -132,9 +271,37 @@ async function handle(cmd, a) {
       const session = a.session || 'default';
       const tab = await chrome.tabs.create({ url: a.url || 'about:blank', active: false });
       await groupTab(tab.id, session);
+      await registerManaged(tab.id, session, 'created');
       if (a.url && a.url !== 'about:blank') { try { await attach(tab.id); await waitComplete(tab.id); } catch (e) {} }
-      return { targetId: String(tab.id), session };
+      return { targetId: String(tab.id), session, ownership: 'created' };
     }
+
+    case 'borrow': {
+      const tabId = Number(a.target);
+      const tab = await chrome.tabs.get(tabId).catch(() => null);
+      if (!tab) throw new Error(`未找到页面 target ${a.target}`);
+      const existing = managedTabs.get(tabId);
+      if (!existing) await attach(tabId);
+      let meta;
+      try {
+        meta = await registerManaged(tabId, a.session || 'default', 'borrowed');
+      } catch (error) {
+        if (!existing) {
+          await new Promise((resolve) => chrome.debugger.detach({ tabId }, () => { void chrome.runtime.lastError; resolve(); }));
+          attached.delete(tabId);
+        }
+        throw error;
+      }
+      return {
+        targetId: String(tabId),
+        session: meta.session,
+        ownership: meta.ownership,
+        alreadyManaged: meta.alreadyManaged,
+      };
+    }
+
+    case 'return':
+      return returnBorrowed(Number(a.target));
 
     case 'navigate': {
       const tabId = Number(a.target);
@@ -159,7 +326,7 @@ async function handle(cmd, a) {
 
     case 'click': {
       const tabId = Number(a.target);
-      const js = '(() => { const el = document.querySelector(' + JSON.stringify(a.selector) + ');'
+      const js = '(() => { const el = ' + elementResolverSource(a.selector) + ';'
         + ' if (!el) return { error: "未找到元素" }; el.scrollIntoView({block:"center"}); el.click();'
         + ' return { clicked: true, tag: el.tagName }; })()';
       return evalIn(tabId, js);
@@ -192,7 +359,7 @@ async function handle(cmd, a) {
 
     case 'type': {
       const tabId = Number(a.target);
-      const focusJs = '(() => { const el = document.querySelector(' + JSON.stringify(a.selector) + ');'
+      const focusJs = '(() => { const el = ' + elementResolverSource(a.selector) + ';'
         + ' if (!el) return { error: "未找到元素" }; el.scrollIntoView({block:"center"}); el.focus();'
         + (a.clear ? ' try { const p = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;'
           + ' const s = Object.getOwnPropertyDescriptor(p, "value").set; s.call(el, ""); el.dispatchEvent(new Event("input",{bubbles:true})); } catch(e){}' : '')
@@ -233,15 +400,24 @@ async function handle(cmd, a) {
     }
 
     case 'close': {
-      await chrome.tabs.remove(Number(a.target));
-      return { ok: true };
+      const tabId = Number(a.target);
+      const meta = requireManaged(tabId);
+      if (meta.ownership === 'borrowed') return returnBorrowed(tabId);
+      await chrome.tabs.remove(tabId);
+      managedTabs.delete(tabId);
+      await persistRegistry();
+      return { targetId: String(tabId), ownership: 'created', action: 'closed' };
     }
 
     case 'closeSession': {
-      const tabs = await chrome.tabs.query({});
-      const ids = tabs.filter((t) => sessionFromGroup(t.groupId) === a.session).map((t) => t.id);
-      if (ids.length) await chrome.tabs.remove(ids);
-      return { closed: ids.length, session: a.session };
+      const targets = [...managedTabs.entries()].filter(([, meta]) => meta.session === a.session);
+      const created = targets.filter(([, meta]) => meta.ownership === 'created').map(([tabId]) => tabId);
+      const borrowed = targets.filter(([, meta]) => meta.ownership === 'borrowed').map(([tabId]) => tabId);
+      for (const tabId of borrowed) await returnBorrowed(tabId);
+      if (created.length) await chrome.tabs.remove(created);
+      for (const tabId of created) managedTabs.delete(tabId);
+      await persistRegistry();
+      return { closed: created.length, returned: borrowed.length, session: a.session };
     }
 
     default:

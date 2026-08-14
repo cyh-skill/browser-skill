@@ -4,6 +4,7 @@
 
 - ✅ **免开 `chrome://inspect` 远程调试开关**
 - ✅ **真·彩色标签组**做会话隔离（`chrome.tabGroups`，每个 `--session` 一个颜色）
+- ✅ **managed target 机械隔离**、显式借还、语义 `@eN` 引用和同目标操作队列
 - ⚠️ 会触发 Chrome 顶部「"browser-skill bridge" 正在调试此浏览器」提示条（`chrome.debugger` 的固有行为，chrome-use 同理）
 - ⚠️ **实验性**：Node 侧的 WS 桥已通过端到端测试；扩展本体（`background.js`）需你在自己的浏览器加载后自测
 
@@ -30,8 +31,8 @@ node scripts/ext-bridge.mjs
 curl -s http://localhost:3456/health      # connected:true 即就绪
 ```
 
-之后 HTTP API 与通道 A 完全一致（`/new`、`/eval`、`/type`、`/humanClick`、`/extract`、`/screenshot`、`/sessions` …），
-SKILL.md 里的所有调用照用即可。会话隔离会在浏览器里表现为彩色标签组。
+之后 HTTP API 与通道 A 完全一致（`/new`、`/borrow`、`/return`、`/snapshot`、`/eval`、`/type`、`/humanClick`、`/extract`、`/screenshot`、`/sessions` …），
+SKILL.md 里的所有调用照用即可。由 `/new` 创建的会话会在浏览器里表现为彩色标签组；借用的用户 tab 保持原位置，归还时只 detach。
 
 ## 环境变量
 
@@ -43,4 +44,5 @@ SKILL.md 里的所有调用照用即可。会话隔离会在浏览器里表现�
 ## 通道 B 暂不支持
 
 - 网络拦截（`/net/*`）：请用通道 A。
-- 其余核心浏览命令均已实现：`list/sessions/new/navigate/back/info/eval/extract/click/clickAt/humanClick/type/scroll/screenshot/close/closeSession`。
+- 文件上传（`/setFiles`）：请用通道 A。
+- 其余核心浏览命令均已实现；created tab 可关闭，borrowed tab 只会归还。

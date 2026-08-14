@@ -22,7 +22,7 @@ Agent ──curl──▶ ext-bridge.mjs(:3456) ──WebSocket(:3458)──▶ 
 
 - **优点**：**最不打扰**——**免开** `chrome://inspect` 调试开关、不问你选哪个浏览器、天然登录态；会话隔离表现为**真·彩色标签组**。
 - **代价**：会触发 Chrome「正在调试此浏览器」提示条（`chrome.debugger` 固有）；网络拦截暂用通道 A。
-- **状态**：Node 侧 WS 桥已端到端测试；扩展本体需你在浏览器加载后自测。
+- **安全语义**：扩展端持久化 managed registry；未知 target 被拒绝，borrowed tab 收尾时只 detach，不会被关闭。
 - **启动**：由统一入口 `node scripts/bridge.mjs` 自动探测起（探到已加载的扩展即用本通道）；也可手动直起 `node scripts/ext-bridge.mjs`，需先在浏览器加载 `extension/` 未打包扩展，详见 `extension/README.md`。
 
 ## 怎么选（默认 B、能力不足才用 A）

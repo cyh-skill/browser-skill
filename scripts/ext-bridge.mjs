@@ -11,13 +11,17 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { URL, fileURLToPath, pathToFileURL } from 'node:url';
+import { HttpError, KeyedQueue, requestQueueKeys, requireTargetId } from './runtime-core.mjs';
+import { semanticSnapshotExpression } from './semantic-snapshot.mjs';
 
 const HTTP_PORT = parseInt(process.env.CDP_PROXY_PORT || '3456');
 const EXT_PORT = parseInt(process.env.EXT_BRIDGE_PORT || '3458');
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ADAPTERS_DIR = path.join(ROOT, 'adapters');
+const operationQueue = new KeyedQueue();
 
 // ================= 极简 WebSocket 服务端 =================
 const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
@@ -130,6 +134,39 @@ function callExt(cmd, args = {}, timeoutMs = 30000) {
   });
 }
 
+async function activateViaCdp(target) {
+  const raw = await callExt('info', { target });
+  const info = JSON.parse(raw);
+  const activePort = path.join(os.homedir(), 'Library/Application Support/Google/Chrome/DevToolsActivePort');
+  const [port, wsPath] = fs.readFileSync(activePort, 'utf8').trim().split(/\r?\n/);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}${wsPath}`);
+  const connected = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('CDP 激活连接超时')), 5000);
+    ws.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
+    ws.addEventListener('error', () => { clearTimeout(timer); reject(new Error('CDP 激活连接失败')); }, { once: true });
+  });
+  const command = (id, method, params = {}) => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${method} 超时`)), 5000);
+    const onMessage = (ev) => {
+      const msg = JSON.parse(ev.data);
+      if (msg.id !== id) return;
+      ws.removeEventListener('message', onMessage);
+      clearTimeout(timer);
+      if (msg.error) reject(new Error(msg.error.message || `${method} 失败`));
+      else resolve(msg.result || {});
+    };
+    ws.addEventListener('message', onMessage);
+    ws.send(JSON.stringify({ id, method, params }));
+  });
+  await connected;
+  const { targetInfos } = await command(1, 'Target.getTargets');
+  const matches = targetInfos.filter((t) => t.type === 'page' && t.url === info.url && t.title === info.title);
+  if (matches.length !== 1) throw new Error(`无法唯一定位待激活标签（匹配 ${matches.length} 个）`);
+  const result = await command(2, 'Target.activateTarget', { targetId: matches[0].targetId });
+  ws.close();
+  return { ok: true, target, cdpTarget: matches[0].targetId, result };
+}
+
 // ================= HTTP API（与通道 A 对齐的子集）=================
 async function readBody(req) { let b = ''; for await (const c of req) b += c; return b; }
 
@@ -139,13 +176,29 @@ const httpServer = http.createServer(async (req, res) => {
   const q = Object.fromEntries(parsed.searchParams);
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   const json = (o, code = 200) => { res.statusCode = code; res.end(JSON.stringify(o)); };
+  const releaseQueue = await operationQueue.acquireMany(requestQueueKeys(p, q));
 
   try {
-    if (p === '/health') return json({ status: 'ok', channel: 'ext-bridge', connected: clientAlive, extPort: EXT_PORT });
+    if (p === '/health') {
+      const extension = clientAlive ? await callExt('health') : null;
+      return json({
+        status: 'ok',
+        channel: 'ext-bridge',
+        apiVersion: '1.4.0',
+        connected: clientAlive,
+        extPort: EXT_PORT,
+        queuedOperations: operationQueue.size,
+        features: ['snapshot', 'elementRefs', 'borrowReturn', 'managedGuard', 'targetQueue'],
+        extension,
+      });
+    }
 
     if (p === '/targets') {
-      const list = await callExt('list');
-      if (q.session) return json(list.filter((t) => t.session === q.session), 200);
+      let list = await callExt('list');
+      if (q.managed === '1' || q.session) {
+        list = list.filter((target) => target.managed);
+        if (q.session) list = list.filter((target) => target.session === q.session);
+      }
       return json(list);
     }
     if (p === '/sessions') return json(await callExt('sessions'));
@@ -154,6 +207,17 @@ const httpServer = http.createServer(async (req, res) => {
       if (req.method !== 'POST') return json({ error: '/new 需 POST，body 为 URL' }, 400);
       const url = (await readBody(req)).trim() || 'about:blank';
       return json(await callExt('new', { url, session: q.session || 'default' }));
+    }
+    if (p === '/borrow') {
+      if (req.method !== 'POST') throw new HttpError('/borrow 需 POST', 400);
+      return json(await callExt('borrow', {
+        target: requireTargetId(q.target),
+        session: q.session || 'default',
+      }));
+    }
+    if (p === '/return') {
+      if (req.method !== 'POST') throw new HttpError('/return 需 POST', 400);
+      return json(await callExt('return', { target: requireTargetId(q.target), session: q.session }));
     }
     if (p === '/close') {
       if (!q.target && q.session) return json(await callExt('closeSession', { session: q.session }));
@@ -166,10 +230,20 @@ const httpServer = http.createServer(async (req, res) => {
     }
     if (p === '/back') return json(await callExt('back', { target: q.target }));
     if (p === '/info') return json(JSON.parse(await callExt('info', { target: q.target })));
+    if (p === '/activate') {
+      if (!q.target) return json({ error: '需要 ?target=ID' }, 400);
+      return json(await activateViaCdp(q.target));
+    }
 
     if (p === '/eval') {
       const expr = (await readBody(req)) || q.expr || 'document.title';
       return json(await callExt('eval', { target: q.target, expr }));
+    }
+
+    if (p === '/snapshot') {
+      const expr = semanticSnapshotExpression({ maxItems: q.maxItems, maxNameLength: q.maxNameLength });
+      const result = await callExt('eval', { target: q.target, expr });
+      return json(result?.value || { count: 0, items: [] });
     }
 
     if (p === '/extract') {
@@ -199,7 +273,9 @@ const httpServer = http.createServer(async (req, res) => {
 
     return json({ error: '未知端点或通道 B 暂不支持（网络拦截等高级能力请用通道 A cdp-proxy）' }, 404);
   } catch (e) {
-    json({ error: e.message }, 500);
+    json({ error: e.message }, e instanceof HttpError ? e.statusCode : 500);
+  } finally {
+    releaseQueue();
   }
 });
 
@@ -220,6 +296,23 @@ async function main() {
   wsServer.listen(EXT_PORT, '127.0.0.1', () => console.log(`[ext-bridge] WS 等待扩展连接 ws://127.0.0.1:${EXT_PORT}`));
   httpServer.listen(HTTP_PORT, '127.0.0.1', () => console.log(`[ext-bridge] HTTP API http://localhost:${HTTP_PORT}`));
 }
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[ext-bridge] ${signal}，正在按所有权收尾 managed target...`);
+  if (clientAlive) {
+    try {
+      const sessions = await callExt('sessions', {}, 5000);
+      for (const entry of sessions) await callExt('closeSession', { session: entry.session }, 5000);
+    } catch (e) { console.error('[ext-bridge] 收尾未完全完成:', e.message); }
+  }
+  try { wsServer.close(); } catch {}
+  try { httpServer.close(); } catch {}
+  process.exit(0);
+}
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('uncaughtException', (e) => console.error('[ext-bridge] 未捕获异常:', e.message));
 process.on('unhandledRejection', (e) => console.error('[ext-bridge] 未处理拒绝:', e?.message || e));
 main();

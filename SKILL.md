@@ -4,19 +4,32 @@ license: MIT
 github: https://github.com/cyh-skill/browser-skill
 description:
   给 Agent 装上完整浏览器操作能力：直连你日常浏览器（天然登录态），做登录后操作、页面交互（点击/填表/滚动）、抓取 JS 动态渲染或反爬平台（小红书/微博/公众号/X 等）。
-  在 web-access(一泽Eze) 的 CDP-proxy 基础上，融合 chrome-use 的多会话隔离、拟人输入、网络拦截，并新增结构化站点适配器。
+  在 web-access(一泽Eze) 的 CDP-proxy 基础上，融合 chrome-use 的多会话隔离、拟人输入、网络拦截，并借鉴 Tencent BrowserSkill 的语义元素引用、标签借还与操作队列。
   普通联网搜索与静态网页抓取优先用内置 WebSearch / WebFetch；只有被登录墙挡、内容靠 JS 渲染、需要模拟真人交互时才用本 skill。
+  Codex 中凡是真实浏览器调用或浏览器自动化，必须经本 skill 的 bridge HTTP API；不得以其他浏览器 MCP、Computer Use 或内置浏览器工具替代。
 metadata:
   author: cyh (cyh-skill)
-  version: "1.2.0"
+  version: "1.4.0"
   based_on:
     - "web-access (一泽Eze, MIT) — CDP-proxy 底座、浏览哲学、站点经验体系"
     - "chrome-use (leeguooooo, Apache-2.0) — 多会话隔离 / 拟人输入 / 网络拦截 / 扩展桥 的思路"
+    - "Tencent BrowserSkill (Apache-2.0) — 语义元素引用 / 标签借还 / 同目标操作队列 的思路"
 ---
 
 # browser-skill
 
 一个融合型浏览器操作 skill。核心是**直连你的日常浏览器**（Chrome / Edge / Chromium 系），天然携带登录态，像人一样完成联网任务。
+
+## Codex / Claude 路由约束
+
+本 skill 同时适用于 Codex 与 Claude。普通静态公开信息仍可用 WebSearch / WebFetch / curl；但从需要启动、读取、控制或自动化真实浏览器的那一刻起，**所有浏览器调用必须只经本 skill 的 `bridge.mjs` 所启动的本地 bridge HTTP API**。Codex 不得改用内置 web 浏览器、其他浏览器 MCP 或 Computer Use；Claude 也不得绕过 bridge。这样才能保留既有登录态、双通道自动选择、managed tab/session 与清理语义。
+
+命令中的 `SKILL_DIR` 是当前已读取 `SKILL.md` 所在目录的**绝对路径**，不硬编码安装位置。Codex 优先取 `CODEX_SKILL_DIR`，Claude 可取 `CLAUDE_SKILL_DIR`；两者均未注入时，由 Agent 以当前读取到的 `SKILL.md` 的父目录赋值。所有自带 `.mjs` 脚本再以 `import.meta.url` 反查其所在目录，因此脚本内部不依赖这些环境变量：
+
+```bash
+export SKILL_DIR="${CODEX_SKILL_DIR:-${CLAUDE_SKILL_DIR:-/absolute/path/to/browser-skill}}"
+node "$SKILL_DIR/scripts/bridge.mjs"
+```
 
 由 `bridge.mjs` 统一入口自动探测、择优连接通道（`auto`：探到扩展走 B、否则回退 A；可用 `--channel` 强制）。**默认走最不打扰的通道 B**——在浏览器加载 `extension/` 未打包扩展即用（免开调试开关、不问你选哪个浏览器、天然登录态）；仅当能力不足（需 `/net/*` 网络拦截、`/setFiles`）时才回退/切到通道 A。两条通道 HTTP API 完全一致，任务里的调用与通道无关：
 
@@ -32,19 +45,19 @@ metadata:
 在开始联网操作前，先跑统一入口 `bridge.mjs`，它会自动探测并择优通道（探到扩展走通道 B，否则回退通道 A · CDP）。**推荐先在浏览器加载 `extension/` 未打包扩展，这样默认走最不打扰的通道 B**（免开调试开关、不问选哪个浏览器、天然登录态）：
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/bridge.mjs"
+node "$SKILL_DIR/scripts/bridge.mjs"
 ```
 
 **Node.js 22+** 必需（使用原生 WebSocket）。
 
 按脚本输出处理：
 - `exit 0` → 继续
-- `exit 2` → 需询问用户偏好，写入 `${CLAUDE_SKILL_DIR}/config.env` 的 `BROWSER_SKILL_BROWSER`
+- `exit 2` → 需询问用户偏好，写入 `$SKILL_DIR/config.env` 的 `BROWSER_SKILL_BROWSER`
 - `exit 1` → 按 stdout 错误信息处理。若提示包含「Agent 处理顺序」，按其步骤执行（如先用系统命令打开浏览器后重跑），自动可解则不打扰用户；仍失败再向用户求助
 
 支持参数 `--browser <id>`（chrome/edge/… 透传通道 A，本次临时覆盖，不写 config.env）；想固定某通道用 `--channel auto|ext|cdp`（默认 auto）、扩展探测超时 `--ext-wait <ms>`（默认 2000）。切换浏览器时先停掉对应通道的桥、再重跑 `bridge.mjs`——通道 A `pkill -f cdp-proxy.mjs`，通道 B `pkill -f ext-bridge.mjs`。
 
-> 默认口径：**优先通道 B**——先在浏览器加载 `extension/` 未打包扩展，`bridge.mjs` 探到即自动走通道 B（最不打扰）；未装扩展则回退通道 A。仅当需要通道 B 不具备的能力（`/net/*` 网络拦截、`/setFiles`）时，用 `node scripts/bridge.mjs --channel cdp` 一条命令切到通道 A（显式 `--channel` 会自动停掉在跑的另一通道再切；`auto` 则复用在跑实例、不打扰）。详见 `extension/README.md` 与 `references/connection-channels.md`。
+> 默认口径：**优先通道 B**——先在浏览器加载 `extension/` 未打包扩展，`bridge.mjs` 探到即自动走通道 B（最不打扰）；未装扩展则回退通道 A。仅当需要通道 B 不具备的能力（`/net/*` 网络拦截、`/setFiles`）时，用 `node "$SKILL_DIR/scripts/bridge.mjs" --channel cdp` 一条命令切到通道 A（显式 `--channel` 会自动停掉在跑的另一通道再切；`auto` 则复用在跑实例、不打扰）。详见 `extension/README.md` 与 `references/connection-channels.md`。
 
 检查通过后必须在回复中向用户直接展示以下须知，再执行操作：
 
@@ -87,7 +100,7 @@ WebSearch / WebFetch / curl 均不处理登录态。**Jina**（可选预处理�
 用户指向**本人访问过的页面**或**组织内部系统**（公网搜不到的目标）时，检索本地浏览器书签/历史：
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/find-url.mjs" [关键词...] [--only bookmarks|history] [--browser chrome|edge] [--limit N] [--since 1d|7h|YYYY-MM-DD] [--sort recent|visits]
+node "$SKILL_DIR/scripts/find-url.mjs" [关键词...] [--only bookmarks|history] [--browser chrome|edge] [--limit N] [--since 1d|7h|YYYY-MM-DD] [--sort recent|visits]
 ```
 
 关键词空格分词、多词 AND，匹配 title + url；`--since`/`--sort` 仅作用于历史；`--sort visits` 按访问次数排序（适合"高频访问网站"场景）。
@@ -103,21 +116,29 @@ node "${CLAUDE_SKILL_DIR}/scripts/find-url.mjs" [关键词...] [--only bookmarks
 
 ## 浏览器操作 API
 
-通过 CDP Proxy（或扩展桥）暴露的 HTTP API 操作浏览器，全部用 curl 调用。默认地址 `http://localhost:3456`。
-不主动操作用户已有 tab，所有操作在自己创建的后台 tab 中进行；完成后 `/close` 关闭自己创建的 tab，保留用户原有 tab。
+通过 CDP Proxy（或扩展桥）暴露的 HTTP API 操作浏览器，全部用 curl 调用。默认地址 `http://localhost:3456`；它是 Codex/Claude 的唯一浏览器自动化入口。
+
+每次浏览器任务按同一生命周期执行：先运行 `bridge.mjs`，再以 `/health` 确认 `status=ok` 且 `connected=true`；优先用 `/new?session=<本任务唯一名>` 创建自己的后台 tab，记录返回的 `targetId`。只有任务明确依赖用户已打开页面时，才先从 `/targets` 确认精确 target，再用 `/borrow` 显式借入本 session。所有读写、截图和交互端点都会机械拒绝未托管 target；结束时关闭 created tab、归还 borrowed tab，或按自己的 `session` 一次收尾。`config.env` 仅供脚本本地读取：不得 `cat`、打印、粘贴到日志或回复，也不得提交。
 
 ### 页面生命周期
 
 ```bash
-# 列出用户已打开的 tab（?managed=1 只列本 skill 托管的、?session=X 过滤会话）
-curl -s http://localhost:3456/targets
+# 健康检查；失败时停止，不发任何浏览器命令
+curl -s http://localhost:3456/health
+# 仅核对本 skill 托管且属于本任务会话的 tab
+curl -s 'http://localhost:3456/targets?managed=1&session=research'
 
 # 创建新后台 tab（自动等待加载）— URL 走 POST body，避免含 query 时被切分
 curl -s -X POST --data-raw 'https://example.com' http://localhost:3456/new
 # 归入某个会话（见「多会话隔离」）
 curl -s -X POST --data-raw 'https://example.com' 'http://localhost:3456/new?session=research'
 
-# 页面信息 / 导航 / 后退 / 关闭
+# 仅在必须使用用户已有 tab 时：先列出，再显式借用；完成后归还且不关闭
+curl -s http://localhost:3456/targets
+curl -s -X POST 'http://localhost:3456/borrow?target=ID&session=research'
+curl -s -X POST 'http://localhost:3456/return?target=ID&session=research'
+
+# 页面信息 / 导航 / 后退 / 关闭（borrowed target 的 /close 等价于安全归还）
 curl -s "http://localhost:3456/info?target=ID"
 curl -s -X POST --data-raw 'https://example.com' "http://localhost:3456/navigate?target=ID"
 curl -s "http://localhost:3456/back?target=ID"
@@ -129,6 +150,9 @@ curl -s "http://localhost:3456/close?target=ID"
 ```bash
 # 执行任意 JS：读写 DOM、提取数据、操控元素、调用页面内部方法。支持 async（await promise），单次 eval 约 10-15s 超时
 curl -s -X POST "http://localhost:3456/eval?target=ID" -d 'document.title'
+
+# 紧凑语义快照；返回 @e1、@e2…，同一页面生命周期内同一元素保持同一引用
+curl -s "http://localhost:3456/snapshot?target=ID"
 
 # 结构化站点适配器提取（返回标准 JSON），见「结构化站点适配器」
 curl -s -X POST "http://localhost:3456/extract?target=ID&adapter=article"
@@ -144,8 +168,8 @@ curl -s "http://localhost:3456/scroll?target=ID&direction=bottom"
 ### 做（交互）
 
 ```bash
-# JS 点击（el.click()，简单快速，覆盖多数场景）
-curl -s -X POST "http://localhost:3456/click?target=ID" -d 'button.submit'
+# 交互端点接受 CSS，也接受 /snapshot 返回的 @eN；语义引用对动态 class 更稳
+curl -s -X POST "http://localhost:3456/click?target=ID" -d '@e3'
 
 # CDP 真实鼠标点击（算用户手势，能触发文件对话框、绕过部分反自动化检测）
 curl -s -X POST "http://localhost:3456/clickAt?target=ID" -d 'button.upload'
@@ -155,7 +179,7 @@ curl -s -X POST "http://localhost:3456/humanClick?target=ID" -d 'button.submit'
 
 # 拟人输入：逐字符变速敲击（支持中文/emoji，会触发原生 input 事件）
 curl -s -X POST "http://localhost:3456/type?target=ID" \
-  -d '{"selector":"input#q","text":"关键词","clear":true,"min":40,"max":160,"enter":true}'
+  -d '{"selector":"@e5","text":"关键词","clear":true,"min":40,"max":160,"enter":true}'
 
 # 文件上传：直接设置 file input 的本地路径，绕过文件对话框
 curl -s -X POST "http://localhost:3456/setFiles?target=ID" \
@@ -183,7 +207,9 @@ curl -s "http://localhost:3456/close?session=projA"       # 一键关掉整个�
 ```
 
 - **通道 A**：会话是逻辑标记（CDP 无标签组能力），用于分组管理/批量关闭。
-- **通道 B**：会话表现为**真·彩色标签组**（每个 session 一个颜色）。
+- **通道 B**：由 `/new` 创建的 tab 表现为**真·彩色标签组**（每个 session 一个颜色）；borrowed 用户 tab 保持原位置，不为分组而移动用户页面。
+- **操作队列**：同一 target 或 session 的请求自动串行，不同 target 仍可并行。
+- **所有权语义**：`/new` 得到 `created`；`/borrow` 得到 `borrowed`。收尾时前者关闭，后者只 detach 并归还，用户原 tab 不会被误关。
 
 配合子 Agent 分治：每个子 Agent 用独立 `session` 名，收尾各自 `?session=` 一键清理，不误伤其他 Agent 的 tab。
 
@@ -227,8 +253,8 @@ curl -s http://localhost:3456/net/clear     # 清空规则（保留调试端口�
 curl -s -X POST "http://localhost:3456/extract?target=ID&adapter=x.com"
 
 # 一条命令跑完（开 tab → 提取 → 关 tab）：
-node "${CLAUDE_SKILL_DIR}/scripts/run-adapter.mjs" article "https://some.blog/post"
-node "${CLAUDE_SKILL_DIR}/scripts/run-adapter.mjs" mp.weixin.qq.com "https://mp.weixin.qq.com/s/xxxx"
+node "$SKILL_DIR/scripts/run-adapter.mjs" article "https://some.blog/post"
+node "$SKILL_DIR/scripts/run-adapter.mjs" mp.weixin.qq.com "https://mp.weixin.qq.com/s/xxxx"
 ```
 
 适配器只提取「当前页面可见/可解析」的结构化快照；需要翻页/全量的复杂抓取（如 X following 全量），仍按对应 `references/site-patterns/*.md` 的实战方案走。新增适配器见 `adapters/README.md`。
@@ -264,7 +290,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/run-adapter.mjs" mp.weixin.qq.com "https://mp.
 按用户输入匹配站点经验：
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/match-site.mjs" "用户输入文本"
+node "$SKILL_DIR/scripts/match-site.mjs" "用户输入文本"
 ```
 
 **发现新的有效模式或陷阱时，就地更新对应站点经验文件**——这是本 skill 越用越强的关键。
@@ -275,4 +301,4 @@ node "${CLAUDE_SKILL_DIR}/scripts/match-site.mjs" "用户输入文本"
 
 ## 任务结束
 
-用 `/close` 关闭自己创建的 tab（或 `?session=` 批量关会话），必须保留用户原有 tab。Proxy 持续运行，不建议主动停止——重启后需在浏览器重新授权 CDP 连接。
+created target 用 `/close`，borrowed target 用 `/return`；也可只用本任务的 `?session=` 一次收尾，服务会自动区分关闭与归还。结束后用 `/targets?managed=1&session=<本任务唯一名>` 验证已无残留。必须保留用户原有 tab 和其他 Agent 的会话。Proxy 持续运行，不建议主动停止——重启后需在浏览器重新授权 CDP 连接。

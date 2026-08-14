@@ -15,6 +15,15 @@ import os from 'node:os';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { selectBrowser, findFallbackPort } from './browser-discovery.mjs';
+import {
+  HttpError,
+  KeyedQueue,
+  ManagedTargetRegistry,
+  elementResolverSource,
+  requestQueueKeys,
+  requireTargetId,
+} from './runtime-core.mjs';
+import { semanticSnapshotExpression } from './semantic-snapshot.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ADAPTERS_DIR = path.join(ROOT, 'adapters');
@@ -35,9 +44,15 @@ let ws = null;
 let cmdId = 0;
 const pending = new Map(); // id -> {resolve, timer}
 const sessions = new Map(); // targetId -> sessionId
-const managedTabs = new Map(); // targetId -> { lastAccessed: number, session: string }
+const managedTabs = new ManagedTargetRegistry();
+const operationQueue = new KeyedQueue();
 const TAB_IDLE_TIMEOUT = parseInt(process.env.CDP_TAB_IDLE_TIMEOUT || '900000'); // 15 min default
 const CLEANUP_INTERVAL = 60000; // sweep every 60s
+const MANAGED_TARGET_PATHS = new Set([
+  '/close', '/return', '/navigate', '/back', '/info', '/eval', '/snapshot',
+  '/extract', '/click', '/clickAt', '/humanClick', '/type', '/setFiles',
+  '/scroll', '/screenshot',
+]);
 
 // --- 网络拦截规则（受 chrome-use 启发）---
 // 每条规则：{ id, action: 'block'|'mock'|'rewrite', pattern(glob), status?, contentType?, body?, redirectUrl? }
@@ -168,7 +183,6 @@ async function connect() {
       chromePort = null; // 重置端口缓存，下次连接重新发现
       chromeWsPath = null;
       sessions.clear();
-      managedTabs.clear();
       fetchEnabledSessions.clear();
     };
     const onMessage = (evt) => {
@@ -316,6 +330,7 @@ async function refreshFetchAllSessions() {
 }
 
 async function ensureSession(targetId) {
+  managedTabs.require(targetId);
   if (sessions.has(targetId)) return sessions.get(targetId);
   const resp = await sendCDP('Target.attachToTarget', { targetId, flatten: true });
   if (resp.result?.sessionId) {
@@ -330,8 +345,28 @@ async function ensureSession(targetId) {
 
 // --- 闲置 Tab 自动清理 ---
 function touchTab(targetId) {
-  const entry = managedTabs.get(targetId);
-  if (entry) entry.lastAccessed = Date.now();
+  managedTabs.touch(targetId);
+}
+
+async function detachTarget(targetId) {
+  const sid = sessions.get(targetId);
+  if (sid) {
+    try { await sendCDP('Target.detachFromTarget', { sessionId: sid }); } catch { /* target may already be detached */ }
+  }
+  sessions.delete(targetId);
+}
+
+async function finishManagedTarget(targetId) {
+  const meta = managedTabs.require(targetId);
+  if (meta.ownership === 'borrowed') {
+    await detachTarget(targetId);
+    managedTabs.delete(targetId);
+    return { targetId, action: 'returned', ownership: 'borrowed' };
+  }
+  try { await sendCDP('Target.closeTarget', { targetId }); } catch { /* tab may already be closed */ }
+  sessions.delete(targetId);
+  managedTabs.delete(targetId);
+  return { targetId, action: 'closed', ownership: 'created' };
 }
 
 async function cleanupIdleTabs() {
@@ -339,10 +374,8 @@ async function cleanupIdleTabs() {
   const now = Date.now();
   for (const [targetId, info] of managedTabs) {
     if (now - info.lastAccessed < TAB_IDLE_TIMEOUT) continue;
-    try { await sendCDP('Target.closeTarget', { targetId }); } catch { /* tab may already be closed */ }
-    sessions.delete(targetId);
-    managedTabs.delete(targetId);
-    console.log(`[CDP Proxy] Auto-closed idle tab: ${targetId}`);
+    const result = await finishManagedTarget(targetId);
+    console.log(`[CDP Proxy] Idle target ${result.action}: ${targetId}`);
   }
 }
 
@@ -350,11 +383,9 @@ async function closeAllManagedTabs() {
   if (!ws || (ws.readyState !== WS.OPEN && ws.readyState !== 1)) return;
   const targets = [...managedTabs.keys()];
   for (const targetId of targets) {
-    try { await sendCDP('Target.closeTarget', { targetId }); } catch { /* ignore */ }
-    sessions.delete(targetId);
-    managedTabs.delete(targetId);
+    try { await finishManagedTarget(targetId); } catch { /* ignore */ }
   }
-  if (targets.length) console.log(`[CDP Proxy] Shutdown: closed ${targets.length} managed tab(s)`);
+  if (targets.length) console.log(`[CDP Proxy] Shutdown: finished ${targets.length} managed target(s)`);
 }
 
 // --- 等待页面加载 ---
@@ -401,8 +432,9 @@ const rnd = (min, max) => min + Math.random() * (max - min);
 // 取元素中心坐标（页面视口坐标）
 async function elementCenter(sid, selector) {
   const selectorJson = JSON.stringify(selector);
+  const resolver = elementResolverSource(selector);
   const js = `(() => {
-    const el = document.querySelector(${selectorJson});
+    const el = ${resolver};
     if (!el) return { error: '未找到元素: ' + ${selectorJson} };
     el.scrollIntoView({ block: 'center', inline: 'center' });
     const rect = el.getBoundingClientRect();
@@ -417,9 +449,20 @@ const server = http.createServer(async (req, res) => {
   const parsed = new URL(req.url, `http://localhost:${PORT}`);
   const pathname = parsed.pathname;
   const q = Object.fromEntries(parsed.searchParams);
-  if (q.target) touchTab(q.target);
-
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  try {
+    if (q.target && MANAGED_TARGET_PATHS.has(pathname)) managedTabs.require(q.target, q.session);
+    else if (pathname === '/borrow' && q.target && managedTabs.has(q.target)) {
+      managedTabs.require(q.target, q.session || 'default');
+    } else if (q.target) touchTab(q.target);
+  } catch (e) {
+    res.statusCode = e instanceof HttpError ? e.statusCode : 500;
+    res.end(JSON.stringify({ error: e.message }));
+    return;
+  }
+  const releaseQueue = await operationQueue.acquireMany(
+    requestQueueKeys(pathname, q, q.target ? managedTabs.get(q.target)?.session : null),
+  );
 
   try {
     // /health 不需要连接浏览器
@@ -428,11 +471,14 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({
         status: 'ok',
         channel: 'cdp-proxy',
+        apiVersion: '1.4.0',
         connected,
         browser: connectedBrowser,
         sessions: sessions.size,
         managedTabs: managedTabs.size,
         netRules: netRules.length,
+        queuedOperations: operationQueue.size,
+        features: ['snapshot', 'elementRefs', 'borrowReturn', 'managedGuard', 'targetQueue'],
         chromePort,
       }));
       return;
@@ -444,11 +490,19 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/targets') {
       const resp = await sendCDP('Target.getTargets');
       let pages = resp.result.targetInfos.filter(t => t.type === 'page');
+      pages = pages.map((target) => {
+        const managed = managedTabs.get(target.targetId);
+        return {
+          ...target,
+          managed: Boolean(managed),
+          session: managed?.session || null,
+          ownership: managed?.ownership || null,
+        };
+      });
       if (q.managed === '1' || q.session) {
         pages = pages
-          .filter(t => managedTabs.has(t.targetId))
-          .filter(t => !q.session || managedTabs.get(t.targetId).session === q.session)
-          .map(t => ({ ...t, session: managedTabs.get(t.targetId).session }));
+          .filter((target) => target.managed)
+          .filter((target) => !q.session || target.session === q.session);
       }
       res.end(JSON.stringify(pages, null, 2));
     }
@@ -469,6 +523,7 @@ const server = http.createServer(async (req, res) => {
           url: byId.get(targetId)?.url || null,
           title: byId.get(targetId)?.title || null,
           lastAccessed: meta.lastAccessed,
+          ownership: meta.ownership,
         });
       }
       res.end(JSON.stringify(
@@ -493,7 +548,7 @@ const server = http.createServer(async (req, res) => {
       const session = q.session || 'default';
       const resp = await sendCDP('Target.createTarget', { url: targetUrl, background: true });
       const targetId = resp.result.targetId;
-      managedTabs.set(targetId, { lastAccessed: Date.now(), session });
+      managedTabs.registerCreated(targetId, session);
 
       // 等待页面加载
       if (targetUrl !== 'about:blank') {
@@ -503,25 +558,54 @@ const server = http.createServer(async (req, res) => {
         } catch { /* 非致命，继续 */ }
       }
 
-      res.end(JSON.stringify({ targetId, session }));
+      res.end(JSON.stringify({ targetId, session, ownership: 'created' }));
+    }
+
+    // POST /borrow?target=xxx&session=NAME - 显式借用用户现有 tab，不取得关闭权
+    else if (pathname === '/borrow') {
+      if (req.method !== 'POST') throw new HttpError('/borrow 需 POST', 400);
+      const targetId = requireTargetId(q.target);
+      const targetResp = await sendCDP('Target.getTargets');
+      const target = targetResp.result?.targetInfos?.find((item) => item.targetId === targetId && item.type === 'page');
+      if (!target) throw new HttpError(`未找到页面 target ${targetId}`, 404);
+      const alreadyManaged = managedTabs.has(targetId);
+      const meta = managedTabs.borrow(targetId, q.session || 'default');
+      try {
+        await ensureSession(targetId);
+      } catch (error) {
+        if (!alreadyManaged) managedTabs.delete(targetId);
+        throw error;
+      }
+      res.end(JSON.stringify({ targetId, session: meta.session, ownership: meta.ownership, alreadyManaged: Boolean(meta.alreadyManaged) }));
+    }
+
+    // POST /return?target=xxx - 归还借用的 tab；只 detach，绝不关闭用户标签页
+    else if (pathname === '/return') {
+      if (req.method !== 'POST') throw new HttpError('/return 需 POST', 400);
+      const targetId = requireTargetId(q.target);
+      const meta = managedTabs.require(targetId, q.session);
+      if (meta.ownership !== 'borrowed') throw new HttpError(`target ${targetId} 由本任务创建，请用 /close 关闭`, 409);
+      await detachTarget(targetId);
+      managedTabs.delete(targetId);
+      res.end(JSON.stringify({ targetId, session: meta.session, ownership: 'borrowed', action: 'returned' }));
     }
 
     // GET /close?target=xxx - 关闭 tab；或 ?session=NAME 批量关闭整个会话
     else if (pathname === '/close') {
       if (!q.target && q.session) {
-        const toClose = [...managedTabs.entries()].filter(([, m]) => m.session === q.session).map(([id]) => id);
-        for (const id of toClose) {
-          try { await sendCDP('Target.closeTarget', { targetId: id }); } catch { /* ignore */ }
-          sessions.delete(id);
-          managedTabs.delete(id);
-        }
-        res.end(JSON.stringify({ closed: toClose.length, session: q.session }));
+        const targets = managedTabs.forSession(q.session);
+        const results = [];
+        for (const target of targets) results.push(await finishManagedTarget(target.targetId));
+        res.end(JSON.stringify({
+          session: q.session,
+          closed: results.filter((item) => item.action === 'closed').length,
+          returned: results.filter((item) => item.action === 'returned').length,
+          targets: results,
+        }));
         return;
       }
-      const resp = await sendCDP('Target.closeTarget', { targetId: q.target });
-      sessions.delete(q.target);
-      managedTabs.delete(q.target);
-      res.end(JSON.stringify(resp.result));
+      const targetId = requireTargetId(q.target);
+      res.end(JSON.stringify(await finishManagedTarget(targetId)));
     }
 
     // POST /navigate?target=xxx (body=URL) - 导航（自动等待加载）
@@ -573,6 +657,26 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // GET /snapshot?target=xxx - 紧凑语义快照；返回可复用于交互命令的稳定 @eN 引用
+    else if (pathname === '/snapshot') {
+      const sid = await ensureSession(q.target);
+      const expression = semanticSnapshotExpression({
+        maxItems: q.maxItems,
+        maxNameLength: q.maxNameLength,
+      });
+      const resp = await sendCDP('Runtime.evaluate', {
+        expression,
+        returnByValue: true,
+        awaitPromise: true,
+      }, sid);
+      if (resp.result?.exceptionDetails) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: resp.result.exceptionDetails.text }));
+      } else {
+        res.end(JSON.stringify(resp.result?.result?.value || { count: 0, items: [] }));
+      }
+    }
+
     // POST /extract?target=xxx&adapter=NAME - 用结构化站点适配器提取（返回 JSON）
     else if (pathname === '/extract') {
       const name = q.adapter;
@@ -620,8 +724,9 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const selectorJson = JSON.stringify(selector);
+      const resolver = elementResolverSource(selector);
       const js = `(() => {
-        const el = document.querySelector(${selectorJson});
+        const el = ${resolver};
         if (!el) return { error: '未找到元素: ' + ${selectorJson} };
         el.scrollIntoView({ block: 'center' });
         el.click();
@@ -720,9 +825,10 @@ const server = http.createServer(async (req, res) => {
       }
       const minD = Number(body.min ?? 40);
       const maxD = Number(body.max ?? 160);
+      const resolver = elementResolverSource(selector);
       // 聚焦元素（可选先清空）
       const focusJs = `(() => {
-        const el = document.querySelector(${JSON.stringify(selector)});
+        const el = ${resolver};
         if (!el) return { error: '未找到元素: ' + ${JSON.stringify(selector)} };
         el.scrollIntoView({ block: 'center' });
         el.focus();
@@ -880,16 +986,19 @@ const server = http.createServer(async (req, res) => {
           '/targets': 'GET - 列出页面（?managed=1 / ?session=X 过滤托管会话）',
           '/sessions': 'GET - 列出托管会话及其 tab',
           '/new': 'POST body=URL（?session=NAME 归入会话）- 新建后台 tab',
-          '/close?target=': 'GET - 关闭 tab（或 ?session=NAME 批量关会话）',
+          '/borrow?target=&session=': 'POST - 显式借用用户已有 tab（不会取得关闭权）',
+          '/return?target=': 'POST - 归还借用 tab，只 detach 不关闭',
+          '/close?target=': 'GET - 关闭 created tab；borrowed tab 自动归还（或 ?session=NAME 收尾会话）',
           '/navigate?target=': 'POST body=URL - 导航',
           '/back?target=': 'GET - 后退',
           '/info?target=': 'GET - 页面标题/URL/状态',
           '/eval?target=': 'POST body=JS - 执行 JS',
+          '/snapshot?target=': 'GET - 语义快照与稳定 @eN 元素引用',
           '/extract?target=&adapter=': 'POST/GET - 结构化站点适配器提取',
-          '/click?target=': 'POST body=CSS - JS 点击',
-          '/clickAt?target=': 'POST body=CSS - CDP 真实鼠标点击',
-          '/humanClick?target=': 'POST body=CSS - 拟人曲线点击',
-          '/type?target=': 'POST body=JSON - 拟人变速输入',
+          '/click?target=': 'POST body=CSS|@eN - JS 点击',
+          '/clickAt?target=': 'POST body=CSS|@eN - CDP 真实鼠标点击',
+          '/humanClick?target=': 'POST body=CSS|@eN - 拟人曲线点击',
+          '/type?target=': 'POST body=JSON（selector 支持 CSS|@eN）- 拟人变速输入',
           '/setFiles?target=': 'POST body=JSON - 文件上传',
           '/scroll?target=&y=&direction=': 'GET - 滚动',
           '/screenshot?target=&file=': 'GET - 截图',
@@ -902,8 +1011,10 @@ const server = http.createServer(async (req, res) => {
       }));
     }
   } catch (e) {
-    res.statusCode = 500;
+    res.statusCode = e instanceof HttpError ? e.statusCode : 500;
     res.end(JSON.stringify({ error: e.message }));
+  } finally {
+    releaseQueue();
   }
 });
 

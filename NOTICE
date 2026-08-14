@@ -1,8 +1,8 @@
 browser-skill
 Copyright (c) 2026 cyh-skill
 
-This product is a derivative / fusion work built on top of two upstream projects.
-Grateful attribution to both:
+This product is a derivative / fusion work built on top of upstream projects.
+Grateful attribution follows:
 
 ────────────────────────────────────────────────────────────────────────
 1) web-access  —  https://github.com/eze-is/web-access
@@ -29,8 +29,19 @@ Grateful attribution to both:
    interception (block / mock / rewrite), and the browser-extension bridge
    connection approach.
 ────────────────────────────────────────────────────────────────────────
+3) Tencent BrowserSkill  —  https://github.com/Tencent/BrowserSkill
+   Author: Tencent
+   License: Apache License 2.0
+
+   Product ideas incorporated (re-implemented independently in JavaScript,
+   with no source copied): semantic element references, explicit borrowing
+   and returning of existing tabs, ownership-aware session cleanup, and
+   per-target/session operation queues.
+────────────────────────────────────────────────────────────────────────
 
 Original additions by cyh-skill: the /extract structured site-adapter
 endpoint and adapters/ modules, run-adapter.mjs, the self-contained
 WebSocket server in ext-bridge.mjs, the MV3 bridge extension, and
-zhihu.com / mp.weixin.qq.com site patterns and adapters.
+zhihu.com / mp.weixin.qq.com site patterns and adapters. Version 1.4 adds
+the independent JavaScript implementation of /snapshot, stable @eN refs,
+managed-target enforcement, safe tab borrowing/returning, and keyed queues.
