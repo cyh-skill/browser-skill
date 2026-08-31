@@ -3,15 +3,17 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "审计 managed target 安全、borrow/return、session 收尾、语义 @eN 引用和同目标串行化。",
-      "expected_output": "逐项 PASS/FAIL，并给出实现证据；旧版应暴露缺口，新版应覆盖全部场景。",
+      "prompt": "审计 Rust Runtime 的 Agent Window、managed target、Provider lease、外部知识库和同 target/session 串行化。",
+      "expected_output": "逐项 PASS/FAIL，并给出代码或运行证据。",
       "files": [],
       "assertions": [
         "未托管 target 的操作被机械拒绝",
         "borrowed target 永远不会被 close",
         "session 收尾区分 created 与 borrowed",
-        "snapshot 生成稳定 @eN 且四种交互命令可消费",
-        "同 target/session 请求进入 KeyedQueue"
+        "observe 生成稳定 @eN 且交互命令可消费",
+        "同 target/session 请求进入 Rust OperationQueue",
+        "CDP 接管前扩展 detach，归还后重新 attach",
+        "核心仓库不含站点知识，Knowledge Store 拒绝路径穿越"
       ]
     }
   ]

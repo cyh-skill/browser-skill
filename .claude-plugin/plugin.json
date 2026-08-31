@@ -1,13 +1,13 @@
 {
   "name": "browser-skill",
-  "description": "Claude/Codex 浏览器操作 skill：真实浏览器统一经 bridge，支持登录态、语义 @eN、标签借还、双通道、操作队列与结构化适配器。",
-  "version": "1.4.0",
+  "description": "Rust 浏览器 Runtime：Agent Window、语义观察、安全标签借还、Extension/CDP 联动和外部 Knowledge Store。",
+  "version": "2.0.0",
   "author": {
     "name": "cyh-skill"
   },
   "homepage": "https://github.com/cyh-skill/browser-skill",
   "repository": "https://github.com/cyh-skill/browser-skill",
   "license": "MIT",
-  "keywords": ["web", "browser", "cdp", "automation", "scraping", "semantic", "session", "extension"],
+  "keywords": ["web", "browser", "rust", "cdp", "automation", "semantic", "session", "extension"],
   "skills": ["./"]
 }

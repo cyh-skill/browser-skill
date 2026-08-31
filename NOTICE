@@ -1,47 +1,27 @@
-browser-skill
 Copyright (c) 2026 cyh-skill
 
-This product is a derivative / fusion work built on top of upstream projects.
-Grateful attribution follows:
+This project began as a fusion/derivative browser skill and retains grateful
+attribution to the following upstream work:
 
-────────────────────────────────────────────────────────────────────────
-1) web-access  —  https://github.com/eze-is/web-access
-   Author: 一泽Eze
-   License: MIT
+1. web-access — https://github.com/eze-is/web-access
+   Author: 一泽Eze. License: MIT.
+   Historical influences retained in the Rust rewrite include browser
+   discovery rules, the local HTTP workflow, and browser-tool routing ideas.
 
-   browser-skill directly derives from web-access. Carried forward largely
-   as-is: the CDP-proxy architecture and HTTP API, browser auto-discovery
-   (browser-discovery.mjs), dependency check (check-deps.mjs), local
-   bookmark/history search (find-url.mjs), site-pattern matching
-   (match-site.mjs), the "browsing philosophy" and tool-selection guidance
-   in SKILL.md, and several site-pattern notes (x.com, xiaohongshu.com,
-   goofish.com, zhipin.com) and the v2.5.3 POST-body migration doc.
+2. chrome-use — https://github.com/leeguooooo/chrome-use
+   Author: leeguooooo. License: Apache License 2.0.
+   Independently reimplemented ideas include multi-session isolation,
+   humanized pointer/typing behavior, network interception, and an extension
+   bridge.
 
-────────────────────────────────────────────────────────────────────────
-2) chrome-use  —  https://github.com/leeguooooo/chrome-use
-   Author: leeguooooo
-   License: Apache License 2.0
+3. Tencent BrowserSkill — https://github.com/Tencent/BrowserSkill
+   Author: Tencent. Current license: MIT.
+   Independently reimplemented product ideas include Agent Windows, semantic
+   references, explicit tab borrowing, human handoff, ownership-aware cleanup,
+   and per-session operation queues. No Tencent source is vendored here.
 
-   Ideas incorporated (re-implemented independently in JS for this skill's
-   CDP-proxy / extension-bridge, not copied from chrome-use's Rust source):
-   multi-session isolation with colored tab groups, humanized input
-   (curved cursor trajectory + variable typing cadence), network
-   interception (block / mock / rewrite), and the browser-extension bridge
-   connection approach.
-────────────────────────────────────────────────────────────────────────
-3) Tencent BrowserSkill  —  https://github.com/Tencent/BrowserSkill
-   Author: Tencent
-   License: Apache License 2.0
-
-   Product ideas incorporated (re-implemented independently in JavaScript,
-   with no source copied): semantic element references, explicit borrowing
-   and returning of existing tabs, ownership-aware session cleanup, and
-   per-target/session operation queues.
-────────────────────────────────────────────────────────────────────────
-
-Original additions by cyh-skill: the /extract structured site-adapter
-endpoint and adapters/ modules, run-adapter.mjs, the self-contained
-WebSocket server in ext-bridge.mjs, the MV3 bridge extension, and
-zhihu.com / mp.weixin.qq.com site patterns and adapters. Version 1.4 adds
-the independent JavaScript implementation of /snapshot, stable @eN refs,
-managed-target enforcement, safe tab borrowing/returning, and keyed queues.
+Version 2.0 replaces the Node host runtime with original Rust code. The
+browser extension remains JavaScript because Chromium MV3 APIs execute in a
+JavaScript service worker. Site-specific patterns and executable adapters are
+not distributed in this repository; they live in a separately configured
+local or Git Knowledge Store.
