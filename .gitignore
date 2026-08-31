@@ -3,5 +3,5 @@ config.env
 
 # 运行时产物
 *.log
-node_modules/
+target/
 .DS_Store

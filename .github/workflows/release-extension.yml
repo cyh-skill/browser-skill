@@ -70,12 +70,12 @@ jobs:
           name: browser-skill extension ${{ steps.meta.outputs.tag }}
           files: browser-skill-extension-${{ steps.meta.outputs.tag }}.zip
           body: |
-            浏览器扩展桥接（Manifest V3 · chrome.debugger 驱动 · 彩色会话隔离）。
+            Browser Skill Extension Provider（Manifest V3 · Agent Window · chrome.debugger · CDP lease）。
 
             ### 安装（加载已解压的扩展）
             1. 下载并解压下方的 `browser-skill-extension-${{ steps.meta.outputs.tag }}.zip`
             2. 打开 `chrome://extensions`，开启右上角「开发者模式」
             3. 点「加载已解压的扩展程序」，选择解压出来的文件夹
-            4. 启动统一入口 `node scripts/bridge.mjs`（自动探测通道；加载了本扩展即自动走通道 B）
+            4. 启动 Rust Runtime：`browser-skill serve`
 
             > 提示：Chrome 不支持直接安装 zip / crx，非商店扩展需用「加载已解压」方式，必须先解压再选文件夹。

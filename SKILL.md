@@ -1,304 +1,63 @@
 ---
 name: cyh-browser-skill
 license: MIT
-github: https://github.com/cyh-skill/browser-skill
-description:
-  给 Agent 装上完整浏览器操作能力：直连你日常浏览器（天然登录态），做登录后操作、页面交互（点击/填表/滚动）、抓取 JS 动态渲染或反爬平台（小红书/微博/公众号/X 等）。
-  在 web-access(一泽Eze) 的 CDP-proxy 基础上，融合 chrome-use 的多会话隔离、拟人输入、网络拦截，并借鉴 Tencent BrowserSkill 的语义元素引用、标签借还与操作队列。
-  普通联网搜索与静态网页抓取优先用内置 WebSearch / WebFetch；只有被登录墙挡、内容靠 JS 渲染、需要模拟真人交互时才用本 skill。
-  Codex 中凡是真实浏览器调用或浏览器自动化，必须经本 skill 的 bridge HTTP API；不得以其他浏览器 MCP、Computer Use 或内置浏览器工具替代。
+description: |
+  通过本地 Rust Runtime 控制用户已登录的 Chromium 浏览器，适用于登录后页面读取、表单与点击流程、动态页面提取、UI 验证和需要人工接管的浏览器任务。扩展 Provider 默认负责 Agent Window、页面理解和普通交互，直连 CDP 仅作为网络拦截、文件上传和浏览器级诊断侧车。静态公开信息优先使用 WebSearch/WebFetch，不要为普通网页检索启动真实浏览器。
 metadata:
-  author: cyh (cyh-skill)
-  version: "1.4.0"
-  based_on:
-    - "web-access (一泽Eze, MIT) — CDP-proxy 底座、浏览哲学、站点经验体系"
-    - "chrome-use (leeguooooo, Apache-2.0) — 多会话隔离 / 拟人输入 / 网络拦截 / 扩展桥 的思路"
-    - "Tencent BrowserSkill (Apache-2.0) — 语义元素引用 / 标签借还 / 同目标操作队列 的思路"
+  author: cyh-skill
+  version: "2.0.0"
+  github: https://github.com/cyh-skill/browser-skill
 ---
 
-# browser-skill
+# cyh-browser-skill
 
-一个融合型浏览器操作 skill。核心是**直连你的日常浏览器**（Chrome / Edge / Chromium 系），天然携带登录态，像人一样完成联网任务。
+所有真实浏览器操作统一通过本 Skill 的本地 Rust Runtime；不要绕过它改用其他浏览器 MCP、Computer Use 或内置浏览器工具。扩展保留用户浏览器登录态，并将 Agent 创建的页面放入独立 Agent Window；用户已有标签页必须经 `/borrow` 的浏览器内确认，完成后归还。
 
-## Codex / Claude 路由约束
+## 何时使用
 
-本 skill 同时适用于 Codex 与 Claude。普通静态公开信息仍可用 WebSearch / WebFetch / curl；但从需要启动、读取、控制或自动化真实浏览器的那一刻起，**所有浏览器调用必须只经本 skill 的 `bridge.mjs` 所启动的本地 bridge HTTP API**。Codex 不得改用内置 web 浏览器、其他浏览器 MCP 或 Computer Use；Claude 也不得绕过 bridge。这样才能保留既有登录态、双通道自动选择、managed tab/session 与清理语义。
+已登录内容、JS 动态渲染、交互流程、表单、UI 验证、截图或静态抓取无法取得目标时使用本 Skill。普通公开网页、搜索摘要、API 或源码检查优先使用静态工具。
 
-命令中的 `SKILL_DIR` 是当前已读取 `SKILL.md` 所在目录的**绝对路径**，不硬编码安装位置。Codex 优先取 `CODEX_SKILL_DIR`，Claude 可取 `CLAUDE_SKILL_DIR`；两者均未注入时，由 Agent 以当前读取到的 `SKILL.md` 的父目录赋值。所有自带 `.mjs` 脚本再以 `import.meta.url` 反查其所在目录，因此脚本内部不依赖这些环境变量：
+开始真实操作前向用户展示：
 
-```bash
-export SKILL_DIR="${CODEX_SKILL_DIR:-${CLAUDE_SKILL_DIR:-/absolute/path/to/browser-skill}}"
-node "$SKILL_DIR/scripts/bridge.mjs"
-```
+> 温馨提示：部分站点对浏览器自动化操作检测严格，存在账号封禁风险。已内置防护措施但无法完全避免，Agent 继续操作即视为接受。强烈建议社交平台用小号操作。
 
-由 `bridge.mjs` 统一入口自动探测、择优连接通道（`auto`：探到扩展走 B、否则回退 A；可用 `--channel` 强制）。**默认走最不打扰的通道 B**——在浏览器加载 `extension/` 未打包扩展即用（免开调试开关、不问你选哪个浏览器、天然登录态）；仅当能力不足（需 `/net/*` 网络拦截、`/setFiles`）时才回退/切到通道 A。两条通道 HTTP API 完全一致，任务里的调用与通道无关：
+## Runtime
 
-| 通道 | 连接方式 | 能力 |
-|------|----------|--------|
-| **B · 扩展桥**（默认推荐，最不打扰） | 加载 `extension/` 未打包扩展，`chrome.debugger` + Node WS 桥 | 免开调试开关、不问选哪个浏览器、天然登录态、真·彩色标签组；有黄色“正在调试此浏览器”提示条；无 `/net/*`。见 `extension/README.md` |
-| **A · CDP-proxy**（能力回退，需 `/net/*`·`/setFiles` 时；已充分验证） | 需开 `chrome://inspect` 远程调试开关，经 cdp + Node WebSocket 直连 | 全部能力（含 `/net/*` 网络拦截、`/setFiles`） |
-
----
-
-## 前置检查
-
-在开始联网操作前，先跑统一入口 `bridge.mjs`，它会自动探测并择优通道（探到扩展走通道 B，否则回退通道 A · CDP）。**推荐先在浏览器加载 `extension/` 未打包扩展，这样默认走最不打扰的通道 B**（免开调试开关、不问选哪个浏览器、天然登录态）：
+优先调用 PATH 中的二进制；仓库根目录 `install.sh` 默认下载预编译 Runtime，不要求本机安装 Rust，只有 `--from-source` 才需要 Rust/Cargo：
 
 ```bash
-node "$SKILL_DIR/scripts/bridge.mjs"
+browser-skill serve
+curl -s http://127.0.0.1:3456/health
 ```
 
-**Node.js 22+** 必需（使用原生 WebSocket）。
+只有 `/health` 返回 `status=ok` 且 `connected=true` 才能操作页面。`providers.extension.connected` 表示扩展可用，`providers.cdp.connected` 表示 CDP 侧车可用。失败时运行 `browser-skill doctor`；不要反复创建 bridge 或标签页。
 
-按脚本输出处理：
-- `exit 0` → 继续
-- `exit 2` → 需询问用户偏好，写入 `$SKILL_DIR/config.env` 的 `BROWSER_SKILL_BROWSER`
-- `exit 1` → 按 stdout 错误信息处理。若提示包含「Agent 处理顺序」，按其步骤执行（如先用系统命令打开浏览器后重跑），自动可解则不打扰用户；仍失败再向用户求助
+## 强制生命周期
 
-支持参数 `--browser <id>`（chrome/edge/… 透传通道 A，本次临时覆盖，不写 config.env）；想固定某通道用 `--channel auto|ext|cdp`（默认 auto）、扩展探测超时 `--ext-wait <ms>`（默认 2000）。切换浏览器时先停掉对应通道的桥、再重跑 `bridge.mjs`——通道 A `pkill -f cdp-proxy.mjs`，通道 B `pkill -f ext-bridge.mjs`。
+1. 为当前任务确定唯一 session 名，通过 `POST /new?session=<name>` 创建 Agent Window 页面并记录 `targetId`。
+2. 每次页面变化后先 `/observe`；需要紧凑控件列表用 `/snapshot`，需要无障碍树或跨复杂结构诊断用 `/a11y`，视觉信息才用 `/screenshot`。
+3. 优先用最新观察得到的 `@eN` 调用 `/click`、`/hover`、`/fill`、`/type`、`/select` 或 `/press`。导航后旧引用失效，必须重新观察。
+4. 验证用户要求的可观察成功条件，达到后立即停止，不继续浏览或点击。
+5. 用 `/close?session=<name>` 收尾；created 页面关闭，borrowed 页面归还。再次查询 `/targets?managed=1&session=<name>`，确认无残留。
 
-> 默认口径：**优先通道 B**——先在浏览器加载 `extension/` 未打包扩展，`bridge.mjs` 探到即自动走通道 B（最不打扰）；未装扩展则回退通道 A。仅当需要通道 B 不具备的能力（`/net/*` 网络拦截、`/setFiles`）时，用 `node "$SKILL_DIR/scripts/bridge.mjs" --channel cdp` 一条命令切到通道 A（显式 `--channel` 会自动停掉在跑的另一通道再切；`auto` 则复用在跑实例、不打扰）。详见 `extension/README.md` 与 `references/connection-channels.md`。
+验证码、OTP、登录或重要确认需要用户介入时调用 `/requestHelp`，不要暴力重试。不得读取或外传密码、Cookie、Token、认证头或密码管理器内容。
 
-检查通过后必须在回复中向用户直接展示以下须知，再执行操作：
+## Provider 路由
 
-```
-温馨提示：部分站点对浏览器自动化操作检测严格，存在账号封禁风险。已内置防护措施但无法完全避免，Agent 继续操作即视为接受。强烈建议社交平台用小号操作。
-```
+默认不传 `provider`：Runtime 自动路由。扩展是主控，CDP 是能力侧车；两者可以同时在线，但同一 target 同一时刻只能由一个 Provider 附着和写入。网络规则或文件上传触发 CDP lease，中央 target/session 队列会阻止并发写；一次性能力完成后归还扩展，持续网络规则在 `/net/clear` 后统一归还。
 
-## 浏览哲学
+需要判断或覆盖路由时，先读 [references/providers.md](references/providers.md)。不要仅因 CDP 可用就跳过 Agent Window、用户借用确认或 managed-target 约束。
 
-**像人一样思考，兼顾高效与适应性的完成任务。**
+## 页面理解与操作
 
-执行任务时不会过度依赖固有印象所规划的步骤，而是带着目标进入，边看边判断，遇到阻碍就解决，发现内容不够就深入——全程围绕「我要达成什么」做决策。
+`/observe` 是默认入口，返回页面元信息、正文摘要、heading、landmark、form、frame 状态和带稳定引用的控件；`/snapshot` 是低 token 控件视图；`/a11y` 是 CDP Accessibility 树补充；`/console`、`/network` 用于只读诊断。只有结构化观察不足以判断视觉布局、Canvas、图片或视频时才截图。
 
-**① 拿到请求** — 先明确用户要做什么，定义成功标准：什么算完成了？需要获取什么信息、执行什么操作、达到什么结果？这是后续所有判断的锚点。
+完整端点、body 和返回格式见 [references/api.md](references/api.md)。Agent Window、所有权和混合 Provider 的设计不变量见 [references/architecture.md](references/architecture.md)。
 
-**② 选择起点** — 根据任务性质、平台特征、达成条件，选一个最可能直达的方式作为第一步去验证。需要操作页面、需要登录态、已知静态方式不可达的平台（小红书、公众号等）→ 直接走浏览器。
+## 外部站点知识
 
-**③ 过程校验** — 每一步的结果都是证据。用结果对照①的成功标准，更新判断：路径在推进吗？结果的整体面貌（质量、相关度、量级）是否指向目标可达？发现方向错了立即调整，不在同一个方式上反复重试——搜索没命中不等于"还没找对方法"，也可能是"目标不存在"；API 报错、页面缺少预期元素、重试无改善，都是在告诉你该重新评估方向。遇到弹窗、登录墙，判断它是否真的挡住目标：挡住了就处理，没挡住就绕过——内容可能已在 DOM 中。
+核心 Skill 不包含任何特定站点经验或 adapter。Runtime 从 `BROWSER_SKILL_KNOWLEDGE_DIR`、`--knowledge-dir` 或默认的 `~/.browser-skill/knowledge` 读取外部 Knowledge Store；该目录可以是普通本地目录，也可以是独立 Git 仓库。
 
-**④ 完成判断** — 对照成功标准确认完成后才停止，也不要为了"完整"过度操作、浪费代价。
+进入页面前可用 `/knowledge/context?url=<url>` 查询已有知识；发现经过实页验证、可重复使用的新结构或陷阱时，用 `/knowledge/scaffold` 生成草稿，由 Agent 完善并现场验证后，写入 `/knowledge/adapters` 或 `/knowledge/patterns`。不要把站点内容写回核心仓库，不要自动拉取不可信 adapter，也不要在未获得用户明确授权时 commit 或 push Knowledge Store。
 
-## 联网工具选择
-
-**确保信息真实性，一手信息优于二手信息**。搜索引擎和聚合平台是发现入口；多次搜索无质的改进时，升级到更根本的获取方式：定位一手来源（官网、官方平台、原始页面）。
-
-| 场景 | 工具 |
-|------|------|
-| 搜索摘要或关键词结果，发现信息来源 | **WebSearch** |
-| URL 已知，从页面定向提取特定信息 | **WebFetch** |
-| URL 已知，需要原始 HTML 源码（meta、JSON-LD 等） | **curl** |
-| 非公开内容，或已知静态层无效的平台（小红书、公众号等公开内容也被反爬限制） | **浏览器（本 skill）** |
-| 需要登录态、交互操作，或需要像人一样在浏览器内自由导航探索 | **浏览器（本 skill）** |
-
-WebSearch / WebFetch / curl 均不处理登录态。**Jina**（可选预处理层）：`r.jina.ai/example.com`（URL 前加前缀），把网页转 Markdown 大幅省 token，适合文章/博客/文档/PDF 等正文类页面；数据面板、商品页等非文章结构可能提取错块。限 20 RPM。
-
-进入浏览器层后，`/eval` 就是你的眼睛和手：**看**（查 DOM 发现链接/按钮/表单/文本）、**做**（`/click`/`/humanClick`/`/type`/`/scroll` 交互）、**读**（提取文字，或对图片/视频 `/screenshot` 视觉识别）。**先了解页面结构，再决定下一步动作**，不需要提前规划所有步骤。
-
-### 补充：本地浏览器书签/历史检索
-
-用户指向**本人访问过的页面**或**组织内部系统**（公网搜不到的目标）时，检索本地浏览器书签/历史：
-
-```bash
-node "$SKILL_DIR/scripts/find-url.mjs" [关键词...] [--only bookmarks|history] [--browser chrome|edge] [--limit N] [--since 1d|7h|YYYY-MM-DD] [--sort recent|visits]
-```
-
-关键词空格分词、多词 AND，匹配 title + url；`--since`/`--sort` 仅作用于历史；`--sort visits` 按访问次数排序（适合"高频访问网站"场景）。
-
-### 程序化操作与 GUI 交互
-
-- **程序化**（构造 URL 直接导航、eval 操作 DOM）：成功时快、精确，但对网站不是正常用户行为，可能触发反爬。
-- **GUI 交互**（`/humanClick` 点按钮、`/type` 填输入、`/scroll` 浏览）：为人设计，网站不限制正常 UI 操作，确定性最高，但步骤多、慢。
-
-灵活选择。GUI 交互也是程序化方式的有效探测（观察站点真实行为：URL 模式、必需参数、跳转逻辑）；程序化受阻时 GUI 是可靠兜底。**站点内交互产生的链接是可靠的**：自然到达的 URL 天然携带平台所需完整上下文；手动构造的 URL 可能缺失隐式必要参数，导致被拦截或触发反爬。
-
----
-
-## 浏览器操作 API
-
-通过 CDP Proxy（或扩展桥）暴露的 HTTP API 操作浏览器，全部用 curl 调用。默认地址 `http://localhost:3456`；它是 Codex/Claude 的唯一浏览器自动化入口。
-
-每次浏览器任务按同一生命周期执行：先运行 `bridge.mjs`，再以 `/health` 确认 `status=ok` 且 `connected=true`；优先用 `/new?session=<本任务唯一名>` 创建自己的后台 tab，记录返回的 `targetId`。只有任务明确依赖用户已打开页面时，才先从 `/targets` 确认精确 target，再用 `/borrow` 显式借入本 session。所有读写、截图和交互端点都会机械拒绝未托管 target；结束时关闭 created tab、归还 borrowed tab，或按自己的 `session` 一次收尾。`config.env` 仅供脚本本地读取：不得 `cat`、打印、粘贴到日志或回复，也不得提交。
-
-### 页面生命周期
-
-```bash
-# 健康检查；失败时停止，不发任何浏览器命令
-curl -s http://localhost:3456/health
-# 仅核对本 skill 托管且属于本任务会话的 tab
-curl -s 'http://localhost:3456/targets?managed=1&session=research'
-
-# 创建新后台 tab（自动等待加载）— URL 走 POST body，避免含 query 时被切分
-curl -s -X POST --data-raw 'https://example.com' http://localhost:3456/new
-# 归入某个会话（见「多会话隔离」）
-curl -s -X POST --data-raw 'https://example.com' 'http://localhost:3456/new?session=research'
-
-# 仅在必须使用用户已有 tab 时：先列出，再显式借用；完成后归还且不关闭
-curl -s http://localhost:3456/targets
-curl -s -X POST 'http://localhost:3456/borrow?target=ID&session=research'
-curl -s -X POST 'http://localhost:3456/return?target=ID&session=research'
-
-# 页面信息 / 导航 / 后退 / 关闭（borrowed target 的 /close 等价于安全归还）
-curl -s "http://localhost:3456/info?target=ID"
-curl -s -X POST --data-raw 'https://example.com' "http://localhost:3456/navigate?target=ID"
-curl -s "http://localhost:3456/back?target=ID"
-curl -s "http://localhost:3456/close?target=ID"
-```
-
-### 看与读
-
-```bash
-# 执行任意 JS：读写 DOM、提取数据、操控元素、调用页面内部方法。支持 async（await promise），单次 eval 约 10-15s 超时
-curl -s -X POST "http://localhost:3456/eval?target=ID" -d 'document.title'
-
-# 紧凑语义快照；返回 @e1、@e2…，同一页面生命周期内同一元素保持同一引用
-curl -s "http://localhost:3456/snapshot?target=ID"
-
-# 结构化站点适配器提取（返回标准 JSON），见「结构化站点适配器」
-curl -s -X POST "http://localhost:3456/extract?target=ID&adapter=article"
-
-# 截图（含视频当前帧）；指定 file 存本地，否则返回二进制
-curl -s "http://localhost:3456/screenshot?target=ID&file=/tmp/shot.png"
-
-# 滚动（触发懒加载）
-curl -s "http://localhost:3456/scroll?target=ID&y=3000"
-curl -s "http://localhost:3456/scroll?target=ID&direction=bottom"
-```
-
-### 做（交互）
-
-```bash
-# 交互端点接受 CSS，也接受 /snapshot 返回的 @eN；语义引用对动态 class 更稳
-curl -s -X POST "http://localhost:3456/click?target=ID" -d '@e3'
-
-# CDP 真实鼠标点击（算用户手势，能触发文件对话框、绕过部分反自动化检测）
-curl -s -X POST "http://localhost:3456/clickAt?target=ID" -d 'button.upload'
-
-# 拟人点击：曲线鼠标轨迹移动到目标再按下/释放（抗检测最强，见「拟人输入」）
-curl -s -X POST "http://localhost:3456/humanClick?target=ID" -d 'button.submit'
-
-# 拟人输入：逐字符变速敲击（支持中文/emoji，会触发原生 input 事件）
-curl -s -X POST "http://localhost:3456/type?target=ID" \
-  -d '{"selector":"@e5","text":"关键词","clear":true,"min":40,"max":160,"enter":true}'
-
-# 文件上传：直接设置 file input 的本地路径，绕过文件对话框
-curl -s -X POST "http://localhost:3456/setFiles?target=ID" \
-  -d '{"selector":"input[type=file]","files":["/path/to/file.png"]}'
-```
-
-### 页面内导航
-
-- **`/click` / `/humanClick`**：在当前 tab 内直接点用户视角中的可交互单元，串行处理。适合连续操作（展开、翻页、进详情）。
-- **`/new` + 完整 URL**：用目标链接**完整地址**（含所有参数）在新 tab 打开，适合同时访问多个页面。很多网站链接含会话参数（如 token），提取 URL 时保留完整地址，不要裁剪。URL 通过 POST body 原样传入 `/new` 或 `/navigate`。
-
----
-
-## 多会话隔离（融合自 chrome-use）
-
-并行调研多个独立目标时，用 `?session=NAME` 把 tab 归入不同会话，各自独立管理、互不干扰：
-
-```bash
-curl -s -X POST --data-raw 'https://a.com' 'http://localhost:3456/new?session=projA'
-curl -s -X POST --data-raw 'https://b.com' 'http://localhost:3456/new?session=projB'
-
-curl -s http://localhost:3456/sessions                    # 列出所有会话及其 tab
-curl -s "http://localhost:3456/targets?session=projA"     # 只看某会话的 tab
-curl -s "http://localhost:3456/close?session=projA"       # 一键关掉整个会话
-```
-
-- **通道 A**：会话是逻辑标记（CDP 无标签组能力），用于分组管理/批量关闭。
-- **通道 B**：由 `/new` 创建的 tab 表现为**真·彩色标签组**（每个 session 一个颜色）；borrowed 用户 tab 保持原位置，不为分组而移动用户页面。
-- **操作队列**：同一 target 或 session 的请求自动串行，不同 target 仍可并行。
-- **所有权语义**：`/new` 得到 `created`；`/borrow` 得到 `borrowed`。收尾时前者关闭，后者只 detach 并归还，用户原 tab 不会被误关。
-
-配合子 Agent 分治：每个子 Agent 用独立 `session` 名，收尾各自 `?session=` 一键清理，不误伤其他 Agent 的 tab。
-
-## 拟人输入（融合自 chrome-use）
-
-面对检测严格的站点，用拟人交互降低被识别为自动化的风险：
-
-- **`/humanClick`**：先沿一条带抖动的贝塞尔曲线把鼠标移到目标，再按下/释放，而非瞬移点击。
-- **`/type`**：逐字符 `Input.insertText` 插入 + 随机停顿（`min`/`max` 毫秒），可选 `clear` 先清空、`enter` 末尾回车。可靠支持中文/emoji，并触发页面的 `input` 事件（React 受控输入也能识别）。
-
-不是所有场景都要拟人——程序化方式更快，只在**目标站点对自动化敏感**时才用。
-
-## 网络拦截（融合自 chrome-use，仅通道 A）
-
-在不改代理配置的前提下，对页面请求做屏蔽 / mock / 改写，用于提速、去干扰、调试：
-
-```bash
-# 屏蔽匹配的请求（* 通配）——如挡掉广告/追踪，页面更快更干净
-curl -s -X POST "http://localhost:3456/net/block" --data-raw '*://*.doubleclick.net/*'
-
-# mock 一个接口的响应（不打真实后端）
-curl -s -X POST "http://localhost:3456/net/mock" \
-  -d '{"pattern":"*://api.example.com/config*","status":200,"contentType":"application/json; charset=utf-8","body":"{\"flag\":true}"}'
-
-# 改写/重定向请求到另一个 URL
-curl -s -X POST "http://localhost:3456/net/rewrite" \
-  -d '{"pattern":"*://cdn.example.com/old.js","redirectUrl":"https://cdn.example.com/new.js"}'
-
-curl -s http://localhost:3456/net/rules     # 列出规则
-curl -s http://localhost:3456/net/clear     # 清空规则（保留调试端口防护）
-```
-
-规则全局生效于所有托管 tab；不设规则时行为与原版一致（零性能影响）。
-
-## 结构化站点适配器
-
-把「怎么从某站点取数据」的经验固化成**可直接返回 JSON** 的提取器（`adapters/<name>.mjs`）。已内置：`article`（通用正文）、`x.com`、`xiaohongshu.com`、`zhihu.com`、`mp.weixin.qq.com`。
-
-```bash
-# 页面已在某 tab 打开时：
-curl -s -X POST "http://localhost:3456/extract?target=ID&adapter=x.com"
-
-# 一条命令跑完（开 tab → 提取 → 关 tab）：
-node "$SKILL_DIR/scripts/run-adapter.mjs" article "https://some.blog/post"
-node "$SKILL_DIR/scripts/run-adapter.mjs" mp.weixin.qq.com "https://mp.weixin.qq.com/s/xxxx"
-```
-
-适配器只提取「当前页面可见/可解析」的结构化快照；需要翻页/全量的复杂抓取（如 X following 全量），仍按对应 `references/site-patterns/*.md` 的实战方案走。新增适配器见 `adapters/README.md`。
-
----
-
-## 关键技术事实
-
-- 页面中存在大量已加载但未展示的内容（轮播非当前帧、折叠区块、懒加载占位），它们在 DOM 中但对用户不可见。以数据结构（容器、属性、节点关系）为单位思考可直接触达。
-- DOM 中有选择器不可跨越的边界（Shadow DOM `shadowRoot`、iframe `contentDocument`）。eval 递归遍历可一次穿透所有层级。
-- `/scroll` 到底部触发懒加载，未进入视口的图片才完成加载；提取图片 URL 前先滚动。
-- 拿到媒体资源 URL 后，公开资源可直接下载到本地读取；需登录态的资源才在浏览器内 navigate + screenshot。
-- 短时间密集打开大量页面（批量 `/new`）可能触发反爬风控——并行创建 tab 时 POST body 偶发串台，建议串行创建或创建后用 `/info` 校验各 tab 真实 URL。
-- 平台返回的"内容不存在""页面不见了"不一定反映真实状态，也可能是访问方式问题（URL 缺参、触发反爬）。
-- `curl -d` 内联 JS 有转义坑（bash 单引号里 `\"` 原样传入）。复杂 JS 用 `--data-binary @file`。
-
-### 视频内容获取
-
-用户浏览器真实渲染，截图可捕获当前视频帧。通过 `/eval` 操控 `<video>` 元素（获取时长、seek 到任意时间点、播放/暂停），配合 `/screenshot` 采帧，可对视频离散采样分析。
-
-### 登录判断
-
-用户日常浏览器天然携带登录态，大多数常用网站已登录。核心问题只有一个：**目标内容拿到了吗？** 打开页面先尝试获取目标内容；只有确认**无法获取**且判断登录能解决时，才告知用户：
-
-> "当前页面在未登录状态下无法获取[具体内容]，请在你的浏览器中登录 [网站名]，完成后告诉我继续。"
-
-登录完成后无需重启任何东西，直接刷新页面继续。
-
-## 站点经验（references/site-patterns/）
-
-按域名沉淀的操作经验（URL 模式、平台特征、已知陷阱），跨 session 复用。前置检查通过后会列出已有经验。当前包含：`x.com`、`xiaohongshu.com`、`zhihu.com`、`mp.weixin.qq.com`、`goofish.com`(闲鱼)、`zhipin.com`(BOSS直聘)。
-
-按用户输入匹配站点经验：
-
-```bash
-node "$SKILL_DIR/scripts/match-site.mjs" "用户输入文本"
-```
-
-**发现新的有效模式或陷阱时，就地更新对应站点经验文件**——这是本 skill 越用越强的关键。
-
-## 并行调研：子 Agent 分治
-
-任务含多个**独立**调研目标时（同时调研 N 个项目/来源/账号），分治给子 Agent 并行执行，共享一个 Proxy。给每个子 Agent 分配独立 `session` 名做隔离，收尾各自 `?session=` 清理。
-
-## 任务结束
-
-created target 用 `/close`，borrowed target 用 `/return`；也可只用本任务的 `?session=` 一次收尾，服务会自动区分关闭与归还。结束后用 `/targets?managed=1&session=<本任务唯一名>` 验证已无残留。必须保留用户原有 tab 和其他 Agent 的会话。Proxy 持续运行，不建议主动停止——重启后需在浏览器重新授权 CDP 连接。
+生成、验证和存储规则见 [references/knowledge-store.md](references/knowledge-store.md)。

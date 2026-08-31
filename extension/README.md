@@ -1,48 +1,17 @@
-# 通道 B：浏览器扩展桥（实验性）
+# Extension Provider
 
-这是可选的第二条连接通道。相比通道 A（CDP-proxy 走 `chrome://inspect` 调试开关），通道 B 用一个未打包扩展 + `chrome.debugger` 驱动浏览器：
+该 MV3 扩展连接 `ws://127.0.0.1:3458` 的 Rust Runtime，并通过 `chrome.debugger` 与 Chrome Extension API 提供：
 
-- ✅ **免开 `chrome://inspect` 远程调试开关**
-- ✅ **真·彩色标签组**做会话隔离（`chrome.tabGroups`，每个 `--session` 一个颜色）
-- ✅ **managed target 机械隔离**、显式借还、语义 `@eN` 引用和同目标操作队列
-- ⚠️ 会触发 Chrome 顶部「"browser-skill bridge" 正在调试此浏览器」提示条（`chrome.debugger` 的固有行为，chrome-use 同理）
-- ⚠️ **实验性**：Node 侧的 WS 桥已通过端到端测试；扩展本体（`background.js`）需你在自己的浏览器加载后自测
+- 每个 session 独立 Agent Window；
+- 用户已有标签页的页面内借用确认；
+- managed ownership、session 收尾与稳定 `@eN`；
+- AX 树、console/network 缓冲、普通交互、设备模拟与人工接管；
+- 与 Direct CDP sidecar 的 `leaseCdp` / `resumeCdp` 精确交接。
 
-> 通常直接用统一入口 `node scripts/bridge.mjs` 自动探测：加载了本扩展就会自动走通道 B，没加载则自动回退通道 A。通道 B 仍与通道 A 二选一、同占 3456 端口，**同一时间只运行一个**。
+## 加载
 
-## 安装
+打开 `chrome://extensions`，启用开发者模式，选择“加载已解压的扩展程序”，指向本目录。重新加载扩展后运行 `browser-skill serve`，再检查 `/health` 中 `providers.extension.connected=true`。
 
-1. 打开 `chrome://extensions`，右上角开启「开发者模式」。
-2. 点「加载已解压的扩展程序」，选择本 `extension/` 目录。
-3. 记下扩展 ID（无所谓具体值）。
+扩展只连接 loopback；Rust WebSocket 服务拒绝非 `chrome-extension://` / `edge-extension://` Origin。`debugger` 与 `<all_urls>` 权限用于用户明确要求的托管页面，不应读取或传输未托管页面内容。
 
-## 运行
-
-> 前提：先按上面「安装」把本扩展加载进浏览器（load unpacked），否则探测不到会回退通道 A。
-
-```bash
-# 首选：统一入口，探到本扩展后会自动起 ext-bridge 走通道 B
-node scripts/bridge.mjs
-
-# 手动 / 强制通道 B 的等价方式（直接起 Node 侧桥，HTTP API 3456 ⇄ WS 3458）
-node scripts/ext-bridge.mjs
-
-# 扩展后台会自动连上；确认：
-curl -s http://localhost:3456/health      # connected:true 即就绪
-```
-
-之后 HTTP API 与通道 A 完全一致（`/new`、`/borrow`、`/return`、`/snapshot`、`/eval`、`/type`、`/humanClick`、`/extract`、`/screenshot`、`/sessions` …），
-SKILL.md 里的所有调用照用即可。由 `/new` 创建的会话会在浏览器里表现为彩色标签组；借用的用户 tab 保持原位置，归还时只 detach。
-
-## 环境变量
-
-| 变量 | 默认 | 说明 |
-|------|------|------|
-| `CDP_PROXY_PORT` | `3456` | HTTP API 端口（与通道 A 同名，便于无缝切换） |
-| `EXT_BRIDGE_PORT` | `3458` | 扩展 ↔ 桥 的 WebSocket 端口 |
-
-## 通道 B 暂不支持
-
-- 网络拦截（`/net/*`）：请用通道 A。
-- 文件上传（`/setFiles`）：请用通道 A。
-- 其余核心浏览命令均已实现；created tab 可关闭，borrowed tab 只会归还。
+Chrome 会显示扩展正在调试页面的提示，这是 `chrome.debugger` 的正常行为。打开 DevTools 可能导致 debugger detach，Runtime 会将后续失败明确返回，不会伪装成功。

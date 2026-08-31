@@ -5,12 +5,12 @@
   },
   "metadata": {
     "description": "Fusion browser-automation skill for Claude Code, Codex, and compatible agents",
-    "version": "1.4.0"
+    "version": "2.0.0"
   },
   "plugins": [
     {
       "name": "browser-skill",
-      "description": "Claude/Codex 真实浏览器统一经 bridge：登录态、语义 @eN、标签借还、多会话队列、拟人输入、网络拦截与结构化适配器",
+      "description": "Rust Runtime 驱动真实浏览器：Agent Window、页面理解、安全借还、Extension/CDP 联动与外部知识库",
       "source": "./",
       "category": "productivity",
       "tags": ["web", "browser", "cdp", "automation", "scraping"]
