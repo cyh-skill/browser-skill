@@ -3,7 +3,7 @@
   "name": "browser-skill bridge",
   "version": "2.0.0",
   "description": "Rust browser-skill 的扩展 Provider：Agent Window、借用确认、页面理解与浏览器自动化。",
-  "permissions": ["debugger", "tabs", "windows", "alarms", "scripting", "storage"],
+  "permissions": ["debugger", "tabs", "tabGroups", "windows", "alarms", "scripting", "storage"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"

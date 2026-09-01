@@ -18,7 +18,7 @@ Rust Runtime
 - HTTP 与两个 WebSocket 监听都绑定 loopback；HTTP 拒绝跨站浏览器 Origin/Fetch，扩展入口只接受 `chrome-extension://` 或 `edge-extension://` Origin。本地其他进程仍属于同一信任边界。
 - 每个请求先取得 target/session 锁；不同 target 可以并行，同一 target 与 session 收尾串行。
 - `created` target 可以关闭；`borrowed` target 只能归还。用户标签默认不受控，`/borrow` 必须通过页面内确认。
-- 每个 extension session 对应独立 Agent Window；借用标签保留在用户原窗口，避免用户关闭 Agent Window 时误删原标签。
+- 每个 extension session 对应独立 Agent Window，Agent 创建页同时进入带 `Agent · <session>` 标题的彩色标签组；借用标签保留在用户原窗口且不加入 Agent 标签组，避免用户关闭 Agent Window 时误删原标签。
 - Extension 是页面主控，CDP 是能力侧车；同一 target 不双重附着。
 - `@eN` 引用来自最近一次页面观察；导航或页面结构变化后必须重新观察。
 - Knowledge Store 在核心仓库之外；adapter 被视为可执行本地代码，只加载显式配置的受信目录。

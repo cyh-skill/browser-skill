@@ -6,10 +6,12 @@ const BRIDGE_URL = 'ws://127.0.0.1:3458';
 const API_VERSION = '2.0.0';
 const managedTabs = new Map();
 const agentWindows = new Map();
+const agentGroups = new Map();
 const commandTails = new Map();
 const attached = new Set();
 const consoleBuffers = new Map();
 const networkBuffers = new Map();
+const GROUP_COLORS = ['blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'];
 let ws = null;
 let reconnectTimer = null;
 let registryLoaded = false;
@@ -18,11 +20,21 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const rnd = (min, max) => min + Math.random() * (max - min);
 const log = (...args) => console.log('[browser-skill]', ...args);
 
+function colorForSession(session) {
+  let hash = 0;
+  for (const character of session) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  return GROUP_COLORS[hash % GROUP_COLORS.length];
+}
+
+function groupTitle(session) {
+  return `Agent · ${session}`;
+}
+
 async function ensureRegistryLoaded() {
   if (registryLoaded) return;
   registryLoaded = true;
   try {
-    const stored = await chrome.storage.session.get(['managedTabs', 'agentWindows']);
+    const stored = await chrome.storage.session.get(['managedTabs', 'agentWindows', 'agentGroups']);
     const tabs = await chrome.tabs.query({});
     const liveTabs = new Set(tabs.map((tab) => tab.id));
     for (const [tabId, metadata] of stored.managedTabs || []) {
@@ -32,6 +44,11 @@ async function ensureRegistryLoaded() {
     const liveWindows = new Set(windows.map((window) => window.id));
     for (const [session, windowId] of stored.agentWindows || []) {
       if (liveWindows.has(Number(windowId))) agentWindows.set(session, Number(windowId));
+    }
+    const groups = await chrome.tabGroups.query({});
+    const liveGroups = new Set(groups.map((group) => group.id));
+    for (const [session, groupId] of stored.agentGroups || []) {
+      if (liveGroups.has(Number(groupId))) agentGroups.set(session, Number(groupId));
     }
     await persistRegistry();
   } catch (error) {
@@ -43,6 +60,7 @@ async function persistRegistry() {
   await chrome.storage.session.set({
     managedTabs: [...managedTabs.entries()],
     agentWindows: [...agentWindows.entries()],
+    agentGroups: [...agentGroups.entries()],
   }).catch((error) => log('registry persist failed', error.message));
 }
 
@@ -92,7 +110,7 @@ function connect() {
     apiVersion: API_VERSION,
     ua: navigator.userAgent,
     instance: chrome.runtime.id,
-    capabilities: ['agentWindow', 'borrowConsent', 'a11y', 'console', 'network', 'emulate', 'humanLoop'],
+    capabilities: ['agentWindow', 'tabGroups', 'borrowConsent', 'a11y', 'console', 'network', 'emulate', 'humanLoop'],
   });
   ws.onclose = () => { ws = null; scheduleReconnect(); };
   ws.onerror = () => { try { ws.close(); } catch {} };
@@ -182,7 +200,15 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   persistRegistry().catch(() => {});
 });
 chrome.windows.onRemoved.addListener((windowId) => {
-  for (const [session, id] of agentWindows) if (id === windowId) agentWindows.delete(session);
+  for (const [session, id] of agentWindows) {
+    if (id !== windowId) continue;
+    agentWindows.delete(session);
+    agentGroups.delete(session);
+  }
+  persistRegistry().catch(() => {});
+});
+chrome.tabGroups.onRemoved.addListener((group) => {
+  for (const [session, groupId] of agentGroups) if (groupId === group.id) agentGroups.delete(session);
   persistRegistry().catch(() => {});
 });
 
@@ -202,6 +228,24 @@ async function ensureAgentWindow(session, url = 'about:blank', noFocus = true) {
   agentWindows.set(session, created.id);
   await persistRegistry();
   return { windowId: created.id, tab };
+}
+
+async function groupAgentTab(tabId, session, windowId) {
+  try {
+    let groupId = agentGroups.get(session);
+    if (groupId != null) {
+      const group = await chrome.tabGroups.get(groupId).catch(() => null);
+      if (!group || group.windowId !== windowId) groupId = undefined;
+    }
+    groupId = await chrome.tabs.group(groupId == null ? { tabIds: [tabId] } : { tabIds: [tabId], groupId });
+    await chrome.tabGroups.update(groupId, { title: groupTitle(session), color: colorForSession(session) });
+    agentGroups.set(session, groupId);
+    await persistRegistry();
+    return groupId;
+  } catch (error) {
+    log('Agent tab grouping failed', error.message);
+    return null;
+  }
 }
 
 async function confirmBorrow(tabId, session) {
@@ -309,7 +353,8 @@ async function execute(command, args) {
           targetId: String(tab.id), tabId: tab.id, url: tab.url, title: tab.title,
           provider: 'extension',
           managed: Boolean(metadata), session: metadata?.session || null, ownership: metadata?.ownership || null,
-          agentWindow: agentWindowIds.has(tab.windowId), windowId: tab.windowId, cdpTargetId: metadata?.cdpTargetId || null,
+          agentWindow: agentWindowIds.has(tab.windowId), windowId: tab.windowId,
+          tabGroupId: tab.groupId >= 0 ? tab.groupId : null, cdpTargetId: metadata?.cdpTargetId || null,
         };
       });
     }
@@ -326,11 +371,12 @@ async function execute(command, args) {
     case 'new': {
       const session = args.session || 'default';
       const { windowId, tab } = await ensureAgentWindow(session, args.url || 'about:blank', args.noFocus !== false);
+      const tabGroupId = await groupAgentTab(tab.id, session, windowId);
       await attach(tab.id);
       const targetId = await cdpTargetId(tab.id);
-      await registerManaged(tab.id, session, 'created', { agentWindowId: windowId, cdpTargetId: targetId });
+      await registerManaged(tab.id, session, 'created', { agentWindowId: windowId, tabGroupId, cdpTargetId: targetId });
       if (args.url && args.url !== 'about:blank') await waitComplete(tab.id);
-      return { targetId: String(tab.id), tabId: tab.id, cdpTargetId: targetId, session, ownership: 'created', agentWindowId: windowId, provider: 'extension' };
+      return { targetId: String(tab.id), tabId: tab.id, cdpTargetId: targetId, session, ownership: 'created', agentWindowId: windowId, tabGroupId, provider: 'extension' };
     }
     case 'borrow': {
       const session = args.session || 'default';
@@ -481,6 +527,7 @@ async function execute(command, args) {
       if (windowId != null) await chrome.windows.remove(windowId).catch(() => {});
       for (const [id] of values) managedTabs.delete(id);
       agentWindows.delete(args.session);
+      agentGroups.delete(args.session);
       await persistRegistry();
       return { session: args.session, closed: values.filter(([, metadata]) => metadata.ownership === 'created').length, returned: values.filter(([, metadata]) => metadata.ownership === 'borrowed').length };
     }

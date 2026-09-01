@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- 恢复 Agent 创建页的彩色 session 标签组，并以 `Agent · <session>` 标题明确区分用户页面与自动化测试页面。
+
 ## 2.0.0 - 2026-08-31
 
 - 将 Node HTTP/WS/CDP 宿主迁移为 Rust Runtime，保留 `127.0.0.1:3456` 兼容 API。
