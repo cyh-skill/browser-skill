@@ -49,6 +49,10 @@
 - `/net/rules`、`/net/clear`：查看或清空规则；clear 同时归还持续 lease。
 - `/provider/lease`、`/provider/release`：底层诊断使用的显式接管。
 
+### 扩展生命周期
+
+- `/extension/load-unpacked`：POST `{"path":"/absolute/extension/directory"}`，通过浏览器级 CDP 加载或重载包含 `manifest.json` 的未打包扩展；仅用于安装、升级和诊断 bridge，不参与页面自动化路由。
+
 ## 外部知识
 
 - `/knowledge`：列出 adapters 与 patterns。
