@@ -17,14 +17,14 @@ Codex / Claude Code ── HTTP ──> Rust Runtime (:3456)
 
 本仓库以 Codex 为当前优先入口：指令入口为 `SKILL.md`，界面元数据为 `agents/openai.yaml`。将仓库目录安装或链接为 `~/.agents/skills/cyh-browser-skill` 后，重新启动 Codex 会话以加载 Skill。Claude Code 兼容元数据保留在 `.claude-plugin/`，个人 Skill 使用 `/cyh-browser-skill`，插件安装使用 `/browser-skill:cyh-browser-skill`；两个入口共享相同的 `SKILL.md`、Runtime、扩展和安全边界。
 
-随后安装本地 Runtime。默认下载带 SHA-256 校验的预编译文件，运行和安装都不需要 Rust/Cargo：
+随后安装本地 Runtime。当前公开仓库尚未发布 `runtime-v2.0.0` 预编译资产，首次安装需使用 Rust stable/Cargo 从源码构建：
 
 ```bash
-./install.sh
+./install.sh --from-source
 browser-skill --version
 ```
 
-开发者需要从源码编译时才使用 `./install.sh --from-source`；本地已有构建产物可用 `./install.sh --binary PATH`。
+本地已有构建产物时可使用 `./install.sh --binary PATH`，不需要 Rust/Cargo。`runtime-v<version>` Release 发布后，直接运行 `./install.sh` 会下载对应平台的预编译文件并校验 SHA-256。
 
 最后打开 `chrome://extensions`，开启开发者模式并加载本仓库的 `extension/`。启动 Runtime：
 
@@ -70,4 +70,4 @@ Node 只用于可选的扩展源码语法检查，不参与 Runtime；浏览器�
 
 ## License
 
-MIT。上游致谢和迁移边界见 [NOTICE](NOTICE)。
+本项目采用 [MIT License](LICENSE)。上游致谢和迁移边界见 [NOTICE](NOTICE)。
