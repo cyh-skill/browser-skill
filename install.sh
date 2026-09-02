@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-SKILL_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SKILL_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 USER_BASE=${HOME:?HOME is required}
 INSTALL_DIR=${BROWSER_SKILL_INSTALL_DIR:-"$USER_BASE/.local/bin"}
 CONFIG_DIR="$USER_BASE/.browser-skill"
@@ -12,6 +12,16 @@ LOCAL_BINARY=
 usage() {
   echo "Usage: ./install.sh [--from-source | --binary PATH]"
   echo "Default: download the prebuilt runtime-v$RUNTIME_VERSION binary; Rust is not required."
+}
+
+download() {
+  url=$1
+  destination=$2
+  if ! curl -fLSs "$url" -o "$destination"; then
+    echo "Failed to download $url" >&2
+    echo "The Runtime release may not exist yet; use --binary PATH or --from-source." >&2
+    exit 1
+  fi
 }
 
 while [ "$#" -gt 0 ]; do
@@ -42,6 +52,10 @@ elif [ "$MODE" = binary ]; then
   [ -f "$LOCAL_BINARY" ] || { echo "Binary not found: $LOCAL_BINARY" >&2; exit 1; }
   install -m 755 "$LOCAL_BINARY" "$INSTALL_DIR/browser-skill"
 else
+  [ -n "$RUNTIME_VERSION" ] || {
+    echo "Unable to determine the Runtime version from Cargo.toml." >&2
+    exit 1
+  }
   OS=$(uname -s)
   ARCH=$(uname -m)
   case "$OS:$ARCH" in
@@ -54,8 +68,8 @@ else
   DOWNLOAD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/browser-skill-install.XXXXXX")
   trap 'rm -rf "$DOWNLOAD_DIR"' EXIT HUP INT TERM
   BASE_URL="https://github.com/cyh-skill/browser-skill/releases/download/runtime-v$RUNTIME_VERSION"
-  curl -fLSs "$BASE_URL/$ASSET" -o "$DOWNLOAD_DIR/$ASSET"
-  curl -fLSs "$BASE_URL/$ASSET.sha256" -o "$DOWNLOAD_DIR/$ASSET.sha256"
+  download "$BASE_URL/$ASSET" "$DOWNLOAD_DIR/$ASSET"
+  download "$BASE_URL/$ASSET.sha256" "$DOWNLOAD_DIR/$ASSET.sha256"
   if command -v sha256sum >/dev/null 2>&1; then
     (cd "$DOWNLOAD_DIR" && sha256sum -c "$ASSET.sha256")
   else

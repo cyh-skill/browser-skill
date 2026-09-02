@@ -1,0 +1,4 @@
+interface:
+  display_name: "cyh Browser Skill"
+  short_description: "安全控制已登录 Chromium 的混合浏览器自动化"
+  default_prompt: "Use $cyh-browser-skill to safely complete this task in my logged-in Chromium browser."

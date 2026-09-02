@@ -6,10 +6,42 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-runtime-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)
+          test -n "$package_version"
+          if [[ "$GITHUB_REF" == refs/tags/runtime-v* ]]; then
+            tag_version=${GITHUB_REF_NAME#runtime-v}
+            if [[ "$tag_version" != "$package_version" ]]; then
+              echo "::error::Runtime tag version $tag_version does not match Cargo.toml version $package_version"
+              exit 1
+            fi
+          fi
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+
   build:
+    needs: verify
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -17,10 +49,10 @@ jobs:
           - os: ubuntu-latest
             artifact: browser-skill-linux-x86_64
             binary: target/release/browser-skill
-          - os: macos-15-arm64
+          - os: macos-15
             artifact: browser-skill-macos-aarch64
             binary: target/release/browser-skill
-          - os: macos-15
+          - os: macos-15-intel
             artifact: browser-skill-macos-x86_64
             binary: target/release/browser-skill
           - os: windows-latest
@@ -28,9 +60,9 @@ jobs:
             binary: target/release/browser-skill.exe
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo build --release --locked
       - shell: bash
         run: |
@@ -40,7 +72,7 @@ jobs:
           else
             shasum -a 256 '${{ matrix.artifact }}' > '${{ matrix.artifact }}.sha256'
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.artifact }}
           path: |
@@ -51,11 +83,19 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/runtime-v')
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: dist
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
+          tag_name: ${{ github.ref_name }}
+          name: browser-skill Runtime ${{ github.ref_name }}
+          generate_release_notes: true
+          make_latest: false
+          fail_on_unmatched_files: true
           files: dist/*

@@ -15,15 +15,30 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-extension
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Validate extension sources
+        run: |
+          jq empty extension/manifest.json
+          node --check extension/background.js
 
       - name: Compute next version
         id: meta
@@ -64,11 +79,12 @@ jobs:
           unzip -l "$ZIP"
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
           name: browser-skill extension ${{ steps.meta.outputs.tag }}
           files: browser-skill-extension-${{ steps.meta.outputs.tag }}.zip
+          fail_on_unmatched_files: true
           body: |
             Browser Skill Extension Provider（Manifest V3 · Agent Window · chrome.debugger · CDP lease）。
 
