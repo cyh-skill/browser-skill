@@ -11,7 +11,7 @@ metadata:
 
 # cyh-browser-skill
 
-所有真实浏览器操作统一通过本 Skill 的本地 Rust Runtime；不要绕过它改用其他浏览器 MCP、Computer Use 或内置浏览器工具。扩展保留用户浏览器登录态，并将 Agent 创建的页面放入独立 Agent Window 和带 `Agent · <session>` 标题的彩色标签组；用户已有标签页必须经 `/borrow` 的浏览器内确认，完成后归还且不会加入 Agent 标签组。
+这是以 Codex 为当前优先入口、同时兼容 Claude Code 的真实浏览器 Skill；Codex 通过 `SKILL.md` 和 `agents/openai.yaml` 发现并调用它，Claude Code 通过 `.claude-plugin/` 元数据加载同一 Skill。所有真实浏览器操作统一通过本 Skill 的本地 Rust Runtime；不要绕过它改用其他浏览器 MCP、Computer Use 或内置浏览器工具。扩展保留用户浏览器登录态，并将 Agent 创建的页面放入独立 Agent Window 和带 `Agent · <session>` 标题的彩色标签组；用户已有标签页必须经 `/borrow` 的浏览器内确认，完成后归还且不会加入 Agent 标签组。
 
 ## 何时使用
 

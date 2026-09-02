@@ -4,7 +4,7 @@
     "name": "cyh-skill"
   },
   "metadata": {
-    "description": "Fusion browser-automation skill for Claude Code, Codex, and compatible agents",
+    "description": "Codex-first browser automation skill with Claude Code compatibility",
     "version": "2.0.0"
   },
   "plugins": [

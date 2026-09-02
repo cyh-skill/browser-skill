@@ -24,13 +24,25 @@ jobs:
           node-version: 22
       - name: Validate Codex Skill
         uses: cyh-skill/.github/actions/validate-skill@ed44478f6dd48649dd1b2ee7dd219d4af7699d8b # organization baseline
-      - name: Check JSON and JavaScript
+      - name: Check Codex and Claude Code metadata
         run: |
-          jq empty \
-            .claude-plugin/marketplace.json \
-            .claude-plugin/plugin.json \
-            evals/evals.json \
-            extension/manifest.json
+          ruby -e '
+            require "yaml"
+            data = YAML.safe_load_file(ARGV.fetch(0), permitted_classes: [], aliases: false)
+            interface = data.fetch("interface")
+            %w[display_name short_description default_prompt].each do |key|
+              value = interface.fetch(key)
+              abort "invalid interface.#{key}" unless value.is_a?(String) && !value.empty?
+            end
+            abort "default_prompt must mention $cyh-browser-skill" unless interface.fetch("default_prompt").include?("$cyh-browser-skill")
+          ' agents/openai.yaml
+          jq -e '.name == "browser-skill" and .version == "2.0.0" and .skills == ["./"]' \
+            .claude-plugin/plugin.json >/dev/null
+          jq -e '.name == "browser-skill" and .metadata.version == "2.0.0" and any(.plugins[]; .name == "browser-skill" and .source == "./")' \
+            .claude-plugin/marketplace.json >/dev/null
+          jq empty evals/evals.json extension/manifest.json
+      - name: Check JavaScript
+        run: |
           node --check extension/background.js
           node --check runtime/observe.js
       - name: Check shell scripts

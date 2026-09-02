@@ -1,11 +1,11 @@
 # cyh-browser-skill
 
-让 Shell-capable Agent 安全控制用户已登录的 Chromium 浏览器。2.0 将原 Node 宿主迁移为 Rust Runtime，并加入独立 Agent Window、浏览器内标签借用确认、增强页面理解、完整交互命令和 Extension/CDP 混合路由。
+面向 Codex（当前优先）并兼容 Claude Code 的真实浏览器 Skill，用本地 Rust Runtime 安全控制用户已登录的 Chromium 浏览器。2.0 将原 Node 宿主迁移为 Rust Runtime，并加入独立 Agent Window、浏览器内标签借用确认、增强页面理解、完整交互命令和 Extension/CDP 混合路由。
 
 ## 架构
 
 ```text
-Agent ── HTTP ──> Rust Runtime (:3456)
+Codex / Claude Code ── HTTP ──> Rust Runtime (:3456)
                     ├─ Extension WS (:3458) ──> Agent Window / chrome.debugger
                     ├─ Direct CDP sidecar ────> network / file / low-level diagnostics
                     └─ external Knowledge Store (~/.browser-skill/knowledge)
@@ -15,7 +15,9 @@ Agent ── HTTP ──> Rust Runtime (:3456)
 
 ## 安装
 
-默认下载带 SHA-256 校验的预编译 Runtime，运行和安装都不需要 Rust/Cargo：
+本仓库以 Codex 为当前优先入口：指令入口为 `SKILL.md`，界面元数据为 `agents/openai.yaml`。将仓库目录安装或链接为 `~/.agents/skills/cyh-browser-skill` 后，重新启动 Codex 会话以加载 Skill。Claude Code 兼容元数据保留在 `.claude-plugin/`，个人 Skill 使用 `/cyh-browser-skill`，插件安装使用 `/browser-skill:cyh-browser-skill`；两个入口共享相同的 `SKILL.md`、Runtime、扩展和安全边界。
+
+随后安装本地 Runtime。默认下载带 SHA-256 校验的预编译文件，运行和安装都不需要 Rust/Cargo：
 
 ```bash
 ./install.sh
@@ -24,7 +26,7 @@ browser-skill --version
 
 开发者需要从源码编译时才使用 `./install.sh --from-source`；本地已有构建产物可用 `./install.sh --binary PATH`。
 
-随后打开 `chrome://extensions`，开启开发者模式并加载本仓库的 `extension/`。启动：
+最后打开 `chrome://extensions`，开启开发者模式并加载本仓库的 `extension/`。启动 Runtime：
 
 ```bash
 browser-skill serve
