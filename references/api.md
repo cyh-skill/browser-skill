@@ -14,7 +14,9 @@
 | `/borrow?target=ID&session=NAME` | POST | 浏览器内确认后借用用户标签 |
 | `/return?target=ID` | POST | 归还 borrowed 标签 |
 | `/close?target=ID` | GET/POST | 关闭 created 或归还 borrowed |
-| `/close?session=NAME` | GET/POST | session 收尾 |
+| `/close?session=NAME` | GET/POST | session 收尾：关闭 created、归还 borrowed，并尝试释放其 CDP lease |
+
+调用结束时查询 `/targets?managed=1&session=NAME` 并落实清理决策：整个用户任务完成时使用 session 收尾；同一用户任务继续时复用原 session 和 `Agent · <session>` 分组，分组内保留一个已声明用途的 created 主 target，其余 target 按 ownership 关闭或归还。交付前再次查询 target、`/net/rules` 和 `/health`，并声明 session 归零或分组复用状态。
 
 ## 页面理解
 
@@ -46,7 +48,7 @@
 - `/net/block?target=ID`：body 为 URL glob。
 - `/net/mock?target=ID`：`{"pattern":"...","status":200,"contentType":"application/json","body":"{}"}`。
 - `/net/rewrite?target=ID`：`{"pattern":"...","redirectUrl":"https://..."}`。
-- `/net/rules`、`/net/clear`：查看或清空规则；clear 同时归还持续 lease。
+- `/net/rules`、`/net/clear`：查看或清空 Runtime 的全部规则；clear 同时归还持续 lease。调用方确认当前规则均由本次调用持有后使用 clear；存在其他调用的规则时报告冲突。
 - `/provider/lease`、`/provider/release`：底层诊断使用的显式接管。
 
 ## 外部知识

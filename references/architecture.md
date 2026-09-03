@@ -20,6 +20,7 @@ Rust Runtime
 - `created` target 可以关闭；`borrowed` target 只能归还。用户标签默认不受控，`/borrow` 必须通过页面内确认。
 - 每个 extension session 对应独立 Agent Window，Agent 创建页同时进入带 `Agent · <session>` 标题的彩色标签组；借用标签保留在用户原窗口且不加入 Agent 标签组，避免用户关闭 Agent Window 时误删原标签。
 - Extension 是页面主控，CDP 是能力侧车；同一 target 不双重附着。
+- 每次调用以显式资源状态结束：整个用户任务完成时关闭 session 及其 Agent 分组、归还 borrowed target 并释放临时规则与 lease；同一任务的连续调用复用原 session 和 Agent 分组，并在分组内保留已声明下一步用途的 created 主 target。
 - `@eN` 引用来自最近一次页面观察；导航或页面结构变化后必须重新观察。
 - Knowledge Store 在核心仓库之外；adapter 被视为可执行本地代码，只加载显式配置的受信目录。
 

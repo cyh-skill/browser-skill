@@ -33,7 +33,7 @@ curl -X POST 'http://127.0.0.1:3456/provider/lease?target=ID&provider=cdp'
 curl -X POST 'http://127.0.0.1:3456/provider/release?target=ID'
 ```
 
-显式 `provider=cdp` 的普通命令会保留 lease，调用方完成诊断后必须 `/provider/release`。session 关闭前 Runtime 也会尝试归还 lease。
+显式 `provider=cdp` 的普通命令会保留 lease。调用方把对应 target 记录在本次资源清单中，并在诊断结束后调用 `/provider/release`；session 收尾也会尝试归还其 lease。交付前通过 `/health` 核对 lease 状态并声明释放结果。
 
 ## 网络规则
 
@@ -44,7 +44,17 @@ curl -X POST --data-raw '*://*.example.com/*' \
   'http://127.0.0.1:3456/net/block?target=ID'
 ```
 
-网络规则必须传入受管 target，规则只匹配该 target 的 Fetch 事件，不会作用到同一浏览器的其他页面。`/net/clear` 清空全部规则、关闭 Runtime 建立的 Fetch 拦截，并把所有扩展来源的 CDP lease 归还。
+网络规则必须传入受管 target，规则只匹配该 target 的 Fetch 事件，不会作用到同一浏览器的其他页面。`/net/clear` 是 Runtime 全局清理动作：当前全部规则都属于本次调用时，用它清空规则、关闭 Fetch 拦截并归还所有扩展来源的 CDP lease；存在其他调用持有的规则时，保留其状态并报告清理冲突。
+
+## 调用结束状态
+
+每次调用结束时形成一条可核对的资源结论：
+
+- `released`：本次显式 lease 已释放，临时规则已清除；
+- `retained`：同一活动任务继续复用原 session 和 `Agent · <session>` 分组，记录分组内主 target 和下一步用途；
+- `blocked`：资源仍有残留，记录 target 或规则、ownership、失败原因和需要的后续动作。
+
+整个用户任务完成时，以 `released` 且该 session 无 managed target 为默认完成状态。同一用户任务的连续浏览器调用以 `retained` 为默认中间状态：复用原 session 和标签分组，分组内保留一个 created 主 target；额外 target 均按 ownership 关闭或归还。用户明确要求多个页面时按指定范围保留在同一分组。
 
 ## 降级边界
 
