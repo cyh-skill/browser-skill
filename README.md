@@ -37,6 +37,7 @@ Chrome/Edge 开启 Remote Debugging 后，Runtime 会自动连接 CDP 侧车；�
 
 ## 核心能力
 
+- 每个用户需求使用稳定 session，并默认复用一个主标签页完成连续修改与验证；只有多页面对照或被测弹窗流程等确有需要时才新增标签页。
 - 每个 session 独立 Agent Window；created/borrowed 所有权机械隔离。
 - `/observe` 的 DOM、同源 frame、开放 Shadow Root、heading、landmark、form、控件状态与稳定 `@eN`；`/a11y` 提供 Accessibility 树补充。
 - click、真实坐标点击、拟人点击、hover、fill、变速 type、select、press、scroll、导航等待、截图、设备模拟、console/network 诊断和人工接管。

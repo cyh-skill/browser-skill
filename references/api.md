@@ -10,7 +10,7 @@
 | `/route?operation=...` | GET | 预览某操作的自动路由 |
 | `/targets` | GET | 页面列表；支持 `managed=1`、`session`、`scope=user|agent|all` |
 | `/sessions` | GET | Runtime 与扩展 session |
-| `/new?session=NAME` | POST URL body | 在 Agent Window 创建页面 |
+| `/new?session=NAME` | POST URL body | 在 Agent Window 创建新页面；调用前先用 `/targets?managed=1&session=NAME` 查找同一需求的可复用主页面，后续 URL 优先对该 target 使用 `/navigate` |
 | `/borrow?target=ID&session=NAME` | POST | 浏览器内确认后借用用户标签 |
 | `/return?target=ID` | POST | 归还 borrowed 标签 |
 | `/close?target=ID` | GET/POST | 关闭 created 或归还 borrowed |

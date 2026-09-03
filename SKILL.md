@@ -34,11 +34,12 @@ curl -s http://127.0.0.1:3456/health
 
 ## 强制生命周期
 
-1. 为当前任务确定唯一 session 名，通过 `POST /new?session=<name>` 创建 Agent Window 页面并记录 `targetId`。
-2. 每次页面变化后先 `/observe`；需要紧凑控件列表用 `/snapshot`，需要无障碍树或跨复杂结构诊断用 `/a11y`，视觉信息才用 `/screenshot`。
-3. 优先用最新观察得到的 `@eN` 调用 `/click`、`/hover`、`/fill`、`/type`、`/select` 或 `/press`。导航后旧引用失效，必须重新观察。
-4. 验证用户要求的可观察成功条件，达到后立即停止，不继续浏览或点击。
-5. 用 `/close?session=<name>` 收尾；created 页面关闭，borrowed 页面归还。再次查询 `/targets?managed=1&session=<name>`，确认无残留。
+1. 为整个用户需求确定唯一且稳定的 session 名；连续修改、重试和验证仍属于同一需求，不得因此更换 session。先查询 `GET /targets?managed=1&session=<name>`：已有适合继续操作的 managed 页面时选定一个主 `targetId` 并持续复用，只有没有可复用页面时才调用一次 `POST /new?session=<name>`；用户已有但尚未托管的页面仍必须通过 `/borrow` 获得确认。
+2. 同一需求默认只保留一个主标签页；访问后续 URL 时对主 target 调用 `/navigate`，不要把每次代码改动、验证轮次、路由切换或失败重试当成新建标签页的理由。仅当用户明确要求多页面、必须同时对照两个页面，或被测流程本身必须验证新窗口/弹窗行为时才新增标签页；新增页仍使用同一 session，并在不再需要时立即关闭。
+3. 每次页面变化后先 `/observe`；需要紧凑控件列表用 `/snapshot`，需要无障碍树或跨复杂结构诊断用 `/a11y`，视觉信息才用 `/screenshot`。
+4. 优先用最新观察得到的 `@eN` 调用 `/click`、`/hover`、`/fill`、`/type`、`/select` 或 `/press`。导航后旧引用失效，必须重新观察。
+5. 验证用户要求的可观察成功条件，达到后立即停止，不继续浏览或点击。
+6. 用 `/close?session=<name>` 收尾；created 页面关闭，borrowed 页面归还。再次查询 `/targets?managed=1&session=<name>`，确认无残留。
 
 验证码、OTP、登录或重要确认需要用户介入时调用 `/requestHelp`，不要暴力重试。不得读取或外传密码、Cookie、Token、认证头或密码管理器内容。
 

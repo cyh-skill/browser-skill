@@ -15,6 +15,18 @@
         "CDP 接管前扩展 detach，归还后重新 attach",
         "核心仓库不含站点知识，Knowledge Store 拒绝路径穿越"
       ]
+    },
+    {
+      "id": 2,
+      "prompt": "同一个前端需求连续修改三次，每次都需要在已登录页面验证；第一次验证已经创建了 Agent 页面。说明后两次验证如何选择 session 和 target，以及什么情况下才允许再创建标签页。",
+      "expected_output": "给出复用同一 session 和主 target 的操作计划，不为每轮修改重复调用 /new。",
+      "files": [],
+      "assertions": [
+        "连续修改、重试和验证沿用同一需求的稳定 session",
+        "先查询 managed targets，已有主页面时复用原 targetId",
+        "后续地址通过 /navigate 在主标签页打开，而不是重复调用 /new",
+        "仅在用户明确要求多页面、必须同时对照或验证弹窗流程时新增标签页"
+      ]
     }
   ]
 }
