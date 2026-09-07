@@ -2,7 +2,7 @@
 
 该 MV3 扩展连接 `ws://127.0.0.1:3458` 的 Rust Runtime，并通过 `chrome.debugger` 与 Chrome Extension API 提供：
 
-- 每个 session 独立 Agent Window，并用带 `Agent · <session>` 标题的彩色标签组标记 Agent 创建页；
+- 每个 session 独立 Agent Window，首次创建时跟随最近聚焦的用户普通窗口尺寸、位置及最大化/全屏状态，并用带 `Agent · <session>` 标题的彩色标签组标记 Agent 创建页；最近聚焦的是 Agent 窗口时改用其他可见用户窗口，无用户窗口时采用浏览器默认尺寸，复用 session 时保留已有窗口布局；
 - 用户已有标签页的页面内借用确认；
 - managed ownership、session 收尾与稳定 `@eN`；
 - AX 树、console/network 缓冲、普通交互、设备模拟与人工接管；

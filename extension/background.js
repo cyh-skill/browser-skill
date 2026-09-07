@@ -212,6 +212,33 @@ chrome.tabGroups.onRemoved.addListener((group) => {
   persistRegistry().catch(() => {});
 });
 
+async function userWindowLayout() {
+  const options = { windowTypes: ['normal'] };
+  const [windows, lastFocused] = await Promise.all([
+    chrome.windows.getAll(options).catch(() => []),
+    chrome.windows.getLastFocused(options).catch(() => null),
+  ]);
+  const agentIds = new Set(agentWindows.values());
+  const isUserWindow = (window) => window && window.type === 'normal'
+    && !window.incognito && !agentIds.has(window.id);
+  const userWindows = windows.filter(isUserWindow);
+  const reference = (isUserWindow(lastFocused) && lastFocused.state !== 'minimized' && lastFocused)
+    || userWindows.find((window) => window.focused && window.state !== 'minimized')
+    || userWindows.find((window) => window.state !== 'minimized')
+    || userWindows[0];
+  // With no user window available, let Chrome choose its natural window size.
+  if (!reference) return { bounds: {} };
+  const bounds = { state: 'normal' };
+  for (const key of ['left', 'top', 'width', 'height']) {
+    const value = reference[key];
+    if (Number.isInteger(value) && (key === 'left' || key === 'top' || value > 0)) bounds[key] = value;
+  }
+  return {
+    bounds,
+    state: ['maximized', 'fullscreen'].includes(reference.state) ? reference.state : undefined,
+  };
+}
+
 async function ensureAgentWindow(session, url = 'about:blank', noFocus = true) {
   const existingId = agentWindows.get(session);
   if (existingId != null) {
@@ -222,7 +249,14 @@ async function ensureAgentWindow(session, url = 'about:blank', noFocus = true) {
     }
     agentWindows.delete(session);
   }
-  const created = await chrome.windows.create({ url, type: 'normal', focused: !noFocus, width: 1280, height: 900 });
+  const layout = await userWindowLayout();
+  const created = await chrome.windows.create({ url, type: 'normal', focused: !noFocus, ...layout.bounds });
+  // Position on the user's display first: Chrome forbids bounds together with
+  // maximized/fullscreen in create(). A separate update preserves both.
+  if (layout.state && created?.id != null) {
+    await chrome.windows.update(created.id, { state: layout.state, focused: !noFocus })
+      .catch((error) => log('Agent window state restore failed', error.message));
+  }
   const tab = created.tabs?.[0];
   if (!tab?.id) throw new Error('failed to create Agent Window tab');
   agentWindows.set(session, created.id);
