@@ -1,6 +1,6 @@
 # Provider 路由与联动
 
-Runtime 同时维护 Extension 与 CDP 两个 Provider。`auto` 是默认值；`provider=extension` 或 `provider=cdp` 只用于诊断、能力覆盖或明确降级，不应成为日常硬编码。
+Runtime 同时维护 Extension 与 CDP 两个 Provider。`auto` 是默认值；`provider=extension` 或 `provider=cdp` 只用于诊断、能力覆盖或明确降级，不应成为日常硬编码。CDP 连接按需建立；普通扩展操作及 `/health` 不连接 CDP，因此不会仅因启动 Runtime 或打开浏览器而触发 Chrome 的远程调试确认。
 
 ## 场景路由
 

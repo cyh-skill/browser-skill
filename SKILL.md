@@ -56,7 +56,7 @@ curl -s http://127.0.0.1:3456/health
 
 ## Provider 路由
 
-默认不传 `provider`：Runtime 自动路由。扩展是主控，CDP 是能力侧车；两者可以同时在线，但同一 target 同一时刻只能由一个 Provider 附着和写入。网络规则或文件上传触发 CDP lease，中央 target/session 队列会阻止并发写；一次性能力完成后归还扩展，持续网络规则在 `/net/clear` 后统一归还。
+默认不传 `provider`：Runtime 自动路由。扩展是主控，CDP 是按需连接的能力侧车；普通浏览器操作不请求 Chrome 远程调试授权。文件上传、网络规则、显式 CDP 诊断或扩展不可用时的 CDP fallback 才建立连接，Chrome 可能要求用户确认。两者可以同时在线，但同一 target 同一时刻只能由一个 Provider 附着和写入。网络规则或文件上传触发 CDP lease，中央 target/session 队列会阻止并发写；一次性能力完成后归还扩展，持续网络规则在 `/net/clear` 后统一归还。
 
 需要判断或覆盖路由时，先读 [references/providers.md](references/providers.md)。Agent Window、用户借用确认和 managed-target 约束适用于所有 Provider；CDP 可用性只决定侧车能力。
 

@@ -33,7 +33,7 @@ browser-skill serve
 curl -s http://127.0.0.1:3456/health
 ```
 
-Chrome/Edge 开启 Remote Debugging 后，Runtime 会自动连接 CDP 侧车；也可设置 `BROWSER_SKILL_CDP_ENDPOINT`。仅使用 Agent Window 和普通自动化时不要求 CDP 侧车。
+Chrome/Edge 开启 Remote Debugging 后，Runtime 仅在文件上传、网络拦截、显式 CDP 诊断或扩展断开后的 CDP fallback 确实需要时连接 CDP 侧车；也可设置 `BROWSER_SKILL_CDP_ENDPOINT` 指定目标。仅使用 Agent Window 和普通自动化时不会请求远程调试权限。Chrome 可能在每次新建 CDP 连接时要求用户确认。
 
 ## 核心能力
 

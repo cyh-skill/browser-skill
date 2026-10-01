@@ -18,7 +18,7 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::state::{AppState, RuntimeConfig};
+use crate::state::RuntimeConfig;
 
 type PendingResult = std::result::Result<Value, String>;
 
@@ -30,6 +30,7 @@ pub struct CdpHub {
 #[derive(Default)]
 struct CdpHubInner {
     current: RwLock<Option<Arc<CdpConnection>>>,
+    connect_lock: Mutex<()>,
     sessions: Mutex<HashMap<String, String>>,
     rules: RwLock<Vec<NetworkRule>>,
     last_error: RwLock<Option<String>>,
@@ -93,6 +94,27 @@ impl CdpHub {
 
     pub async fn last_error(&self) -> Option<String> {
         self.inner.last_error.read().await.clone()
+    }
+
+    pub async fn ensure_connected(&self, config: &RuntimeConfig) -> Result<()> {
+        if self.connected().await {
+            return Ok(());
+        }
+        let _guard = self.inner.connect_lock.lock().await;
+        if self.connected().await {
+            return Ok(());
+        }
+        let result = async {
+            let endpoint = discover_endpoint(config)
+                .await?
+                .ok_or_else(|| anyhow!("CDP endpoint unavailable; enable remote debugging or configure BROWSER_SKILL_CDP_ENDPOINT"))?;
+            self.connect(endpoint).await
+        }
+        .await;
+        if let Err(error) = &result {
+            *self.inner.last_error.write().await = Some(error.to_string());
+        }
+        result
     }
 
     pub async fn connect(&self, endpoint: String) -> Result<()> {
@@ -429,27 +451,6 @@ impl CdpHub {
         };
         self.call(method, params, Some(session)).await.ok();
     }
-}
-
-pub fn spawn_reconnector(state: Arc<AppState>) {
-    tokio::spawn(async move {
-        loop {
-            if !state.cdp.connected().await {
-                match discover_endpoint(&state.config).await {
-                    Ok(Some(endpoint)) => {
-                        if let Err(error) = state.cdp.connect(endpoint).await {
-                            *state.cdp.inner.last_error.write().await = Some(error.to_string());
-                        }
-                    }
-                    Ok(None) => {}
-                    Err(error) => {
-                        *state.cdp.inner.last_error.write().await = Some(error.to_string())
-                    }
-                }
-            }
-            tokio::time::sleep(Duration::from_secs(5)).await;
-        }
-    });
 }
 
 pub async fn doctor(config: &RuntimeConfig) -> Value {

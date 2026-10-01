@@ -113,8 +113,6 @@ async fn serve(args: ServeArgs) -> Result<()> {
         }
     });
 
-    cdp::spawn_reconnector(state.clone());
-
     let address = SocketAddr::from(([127, 0, 0, 1], config.http_port));
     let listener = TcpListener::bind(address)
         .await

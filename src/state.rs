@@ -177,22 +177,32 @@ impl AppState {
     ) -> Result<Provider, String> {
         if let Some(forced) = forced {
             return match forced {
-                Provider::Extension if self.extension.connected().await => Ok(forced),
-                Provider::Cdp if self.cdp.connected().await => Ok(forced),
+                Provider::Extension if self.extension.connected().await => Ok(Provider::Extension),
                 Provider::Extension => Err("extension provider is not connected".into()),
-                Provider::Cdp => Err("CDP provider is not connected".into()),
+                Provider::Cdp => self
+                    .cdp
+                    .ensure_connected(&self.config)
+                    .await
+                    .map(|()| Provider::Cdp)
+                    .map_err(|error| error.to_string()),
             };
         }
         if cdp_required {
-            return self.cdp.connected().await.then_some(Provider::Cdp)
-                .ok_or_else(|| "this operation requires CDP; enable remote debugging or configure BROWSER_SKILL_CDP_ENDPOINT".into());
+            return self
+                .cdp
+                .ensure_connected(&self.config)
+                .await
+                .map(|()| Provider::Cdp)
+                .map_err(|error| error.to_string());
         }
         if self.extension.connected().await {
             Ok(Provider::Extension)
-        } else if self.cdp.connected().await {
-            Ok(Provider::Cdp)
         } else {
-            Err("no browser provider is connected".into())
+            self.cdp
+                .ensure_connected(&self.config)
+                .await
+                .map(|()| Provider::Cdp)
+                .map_err(|error| error.to_string())
         }
     }
 }

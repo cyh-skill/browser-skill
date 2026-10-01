@@ -257,6 +257,13 @@ async fn targets(
 ) -> ApiResult<impl IntoResponse> {
     let forced = parse_provider(&params)?;
     let extension_connected = state.extension.connected().await;
+    if forced == Some(Provider::Cdp) || (!extension_connected && forced.is_none()) {
+        state
+            .cdp
+            .ensure_connected(&state.config)
+            .await
+            .map_err(|error| ApiError::Unavailable(error.to_string()))?;
+    }
     let cdp_connected = state.cdp.connected().await;
     if forced == Some(Provider::Extension) && !extension_connected {
         return Err(ApiError::Unavailable(
@@ -1680,12 +1687,12 @@ async fn choose_for(
                     "target {target_id} is leased to CDP; release the provider lease first"
                 )));
             }
-            if state.cdp.connected().await {
-                return Ok(Provider::Cdp);
-            }
-            return Err(ApiError::Unavailable(
-                "target is leased to CDP but the CDP provider disconnected".into(),
-            ));
+            state
+                .cdp
+                .ensure_connected(&state.config)
+                .await
+                .map_err(|error| ApiError::Unavailable(error.to_string()))?;
+            return Ok(Provider::Cdp);
         }
         if target.primary_provider == Provider::Cdp {
             if forced == Some(Provider::Extension) {
@@ -1693,12 +1700,12 @@ async fn choose_for(
                     "target {target_id} is owned by the CDP provider"
                 )));
             }
-            return state
+            state
                 .cdp
-                .connected()
+                .ensure_connected(&state.config)
                 .await
-                .then_some(Provider::Cdp)
-                .ok_or_else(|| ApiError::Unavailable("CDP provider is not connected".into()));
+                .map_err(|error| ApiError::Unavailable(error.to_string()))?;
+            return Ok(Provider::Cdp);
         }
         if forced.is_none() && !cdp_required && state.extension.connected().await {
             return Ok(Provider::Extension);
@@ -1711,12 +1718,12 @@ async fn choose_for(
 }
 
 async fn lease_to_cdp(state: &Arc<AppState>, target_id: &str) -> ApiResult<String> {
-    if !state.cdp.connected().await {
-        return Err(ApiError::Unavailable(
-            "CDP provider is not connected".into(),
-        ));
-    }
     let mut target = ensure_managed_target(state, target_id).await?;
+    state
+        .cdp
+        .ensure_connected(&state.config)
+        .await
+        .map_err(|error| ApiError::Unavailable(error.to_string()))?;
     if target.primary_provider == Provider::Cdp {
         return Ok(target.cdp_target_id.unwrap_or_else(|| target_id.to_owned()));
     }
