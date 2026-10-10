@@ -5,3 +5,5 @@ config.env
 *.log
 target/
 .DS_Store
+node_modules/
+data/group-cleaner/

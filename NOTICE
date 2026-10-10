@@ -25,3 +25,11 @@ browser extension remains JavaScript because Chromium MV3 APIs execute in a
 JavaScript service worker. Site-specific patterns and executable adapters are
 not distributed in this repository; they live in a separately configured
 local or Git Knowledge Store.
+
+The optional native saved-tab-group cleaner includes MIT-licensed JavaScript
+compiled from chrome-tab-group-cleaner by Franz Enzenhofer:
+https://github.com/franzenzenhofer/chrome-tab-group-cleaner
+Revision: 3f9d94af3b150583777af27795225e29852a5f80.
+See native/vendor/chrome-tab-group-cleaner/LICENSE and README.md.
+This optional maintenance component uses Node.js; the browser automation
+Runtime continues to use Rust.

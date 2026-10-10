@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>清理标签组 · browser-skill</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header><span class="eyebrow">BROWSER SKILL</span><h1>清理已保存的标签组</h1><p>手动清理历史分组，让 Chrome 保持整洁。</p></header>
+  <main>
+    <label for="scope">清理范围</label>
+    <select id="scope"><option value="agent">历史 Agent 分组</option><option value="all">所有已关闭的分组（含个人分组）</option></select>
+    <label class="check"><input id="orphans" type="checkbox" checked><span>同时清理无所属分组的孤立标签记录</span></label>
+    <p class="hint">正在打开的分组会保留。清理需要退出并重启 Chrome，当前窗口和标签页将通过会话恢复重新打开；未提交的表单可能丢失。</p>
+    <button id="preview" class="secondary">扫描并预览</button>
+    <section id="result" hidden>
+      <div class="summary"><strong id="count"></strong><span id="protected"></span></div>
+      <p id="profile" class="hint"></p>
+      <ul id="groups" aria-label="待删除分组"></ul>
+      <p id="empty" class="hint" hidden>没有需要清理的记录。</p>
+      <label id="sync-label" class="check" hidden><input id="sync" type="checkbox"><span>确认同步删除：同一账号其他设备的对应分组也可能被删除；若 Chrome 不接受删除标记，分组可能重新出现。</span></label>
+      <label id="confirm-label" class="check"><input id="confirm" type="checkbox"><span>已保存页面工作，确认删除以上记录并重启 Chrome</span></label>
+      <button id="clean" class="danger" disabled>清理并重启 Chrome</button>
+      <p class="hint">执行前自动备份，成功后保留最近 3 份（含本次）。重启后打开插件可查看结果和备份位置。</p>
+    </section>
+    <p id="status" role="status" aria-live="polite"></p>
+    <section id="setup" hidden><strong>首次使用需要安装本地清理组件</strong><p>仅支持 macOS 的单配置 Google Chrome。点击下方复制安装命令，在本仓库目录执行，然后重新加载扩展。</p><button id="copy-install" class="secondary">复制安装命令</button><code id="install-command"></code></section>
+    <details id="last" hidden><summary>上次清理结果</summary><p id="last-result"></p><code id="backup"></code></details>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

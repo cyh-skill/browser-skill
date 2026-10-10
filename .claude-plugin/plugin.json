@@ -1,7 +1,7 @@
 {
   "name": "browser-skill",
   "description": "Rust 浏览器 Runtime：Agent Window、语义观察、安全标签借还、Extension/CDP 联动和外部 Knowledge Store。",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "author": {
     "name": "cyh-skill"
   },

@@ -43,6 +43,7 @@ Chrome/Edge 开启 Remote Debugging 后，Runtime 仅在文件上传、网络拦
 - click、真实坐标点击、拟人点击、hover、fill、变速 type、select、press、scroll、导航等待、截图、设备模拟、console/network 诊断和人工接管。
 - CDP sidecar 提供文件上传以及请求 block/mock/rewrite。
 - Rust target/session 队列与 Provider lease，支持多个页面并行、同一页面串行。
+- 扩展工具栏弹窗支持手动预览并清理历史已保存分组，保留打开的分组；macOS 单配置 Chrome 需安装可选本地组件，详见 [extension/README.md](extension/README.md#手动清理已保存的标签组)。
 
 完整工作流见 [SKILL.md](SKILL.md)，Provider 边界见 [references/providers.md](references/providers.md)，API 见 [references/api.md](references/api.md)。
 
@@ -65,9 +66,11 @@ cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
 node --check extension/background.js
 node --check runtime/observe.js
+npm ci --prefix native
+npm test --prefix native
 ```
 
-Node 只用于可选的扩展源码语法检查，不参与 Runtime；浏览器扩展仍必须使用 JavaScript/MV3 API。
+Node 不参与浏览器自动化 Runtime；可选的手动分组清理组件需要 Node.js 20+。浏览器扩展使用 JavaScript/MV3 API。
 
 ## License
 

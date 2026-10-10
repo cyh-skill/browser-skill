@@ -5,7 +5,7 @@ description: |
   通过本地 Rust Runtime 控制用户已登录的 Chromium 浏览器，执行登录态页面读取、表单与点击流程、动态页面提取、截图、UI 验证和人工接管。扩展 Provider 负责 Agent Window、页面理解和普通交互，直连 CDP 作为网络拦截、文件上传和浏览器级诊断侧车；普通公开信息检索使用 WebSearch/WebFetch。
 metadata:
   author: cyh-skill
-  version: "2.0.0"
+  version: "2.1.0"
   github: https://github.com/cyh-skill/browser-skill
 ---
 
@@ -65,6 +65,10 @@ curl -s http://127.0.0.1:3456/health
 `/observe` 是默认入口，返回页面元信息、正文摘要、heading、landmark、form、frame 状态和带稳定引用的控件；`/snapshot` 是低 token 控件视图；`/a11y` 是 CDP Accessibility 树补充；`/console`、`/network` 用于只读诊断。只有结构化观察不足以判断视觉布局、Canvas、图片或视频时才截图。
 
 完整端点、body 和返回格式见 [references/api.md](references/api.md)。Agent Window、所有权和混合 Provider 的设计不变量见 [references/architecture.md](references/architecture.md)。
+
+## 手动清理历史标签组
+
+2.1 的扩展工具栏弹窗支持用户手动预览并清理已关闭的历史 Agent 分组，也可选择全部已关闭分组和孤立标签记录；保留正在打开的分组。此维护功能需要 macOS 单配置标准 Chrome 和可选 Native Messaging 组件，与 Rust Runtime 的浏览器控制协议独立。用户确认后退出 Chrome、备份并删除，再恢复上次会话；成功后保留最近 3 份备份，保存在插件目录的 `data/group-cleaner/backups/`。安装和恢复步骤见 [extension/README.md](extension/README.md#手动清理已保存的标签组)。此功能只由用户点击触发，不代替上述 session 收尾步骤。
 
 ## 外部站点知识
 

@@ -108,6 +108,7 @@ function connect() {
   ws.onopen = () => send({
     type: 'hello',
     apiVersion: API_VERSION,
+    extensionVersion: chrome.runtime.getManifest().version,
     ua: navigator.userAgent,
     instance: chrome.runtime.id,
     capabilities: ['agentWindow', 'tabGroups', 'borrowConsent', 'a11y', 'console', 'network', 'emulate', 'humanLoop'],
@@ -373,7 +374,7 @@ async function execute(command, args) {
   const tabId = Number(args.target);
   switch (command) {
     case 'health':
-      return { apiVersion: API_VERSION, connected: true, managedTabs: managedTabs.size, agentWindows: agentWindows.size };
+      return { apiVersion: API_VERSION, extensionVersion: chrome.runtime.getManifest().version, connected: true, managedTabs: managedTabs.size, agentWindows: agentWindows.size };
     case 'list': {
       const tabs = await chrome.tabs.query({});
       const agentWindowIds = new Set(agentWindows.values());
@@ -556,14 +557,26 @@ async function execute(command, args) {
     }
     case 'closeSession': {
       const values = [...managedTabs.entries()].filter(([, metadata]) => metadata.session === args.session);
-      for (const [id, metadata] of values) if (metadata.ownership === 'borrowed') await returnBorrowed(id);
-      const windowId = agentWindows.get(args.session);
-      if (windowId != null) await chrome.windows.remove(windowId).catch(() => {});
-      for (const [id] of values) managedTabs.delete(id);
+      let closed = 0;
+      let returned = 0;
+      for (const [id, metadata] of values) {
+        if (metadata.ownership === 'borrowed') {
+          await returnBorrowed(id);
+          returned++;
+          continue;
+        }
+        // A user may move created tabs out of the original Agent Window, or
+        // move their own tabs into it. Close only the session's created tabs
+        // wherever they now live; never remove an entire window blindly.
+        const tab = await chrome.tabs.get(id).catch(() => null);
+        if (tab) { await chrome.tabs.remove(id); closed++; }
+        managedTabs.delete(id);
+        await persistRegistry();
+      }
       agentWindows.delete(args.session);
       agentGroups.delete(args.session);
       await persistRegistry();
-      return { session: args.session, closed: values.filter(([, metadata]) => metadata.ownership === 'created').length, returned: values.filter(([, metadata]) => metadata.ownership === 'borrowed').length };
+      return { session: args.session, closed, returned };
     }
     default: throw new Error(`unknown extension command: ${command}`);
   }
