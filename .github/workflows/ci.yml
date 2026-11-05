@@ -45,6 +45,7 @@ jobs:
         run: |
           node --check extension/background.js
           node --check runtime/observe.js
+          node tests/test_help_queue.js
       - name: Check shell scripts
         run: |
           sh -n install.sh tests/test_install.sh

@@ -359,7 +359,7 @@ async function handle(command, args) {
     if (metadata.cdpLeased && !['leaseCdp', 'resumeCdp', 'resolveTarget', 'close', 'return'].includes(command)) {
       throw new Error(`target ${tabId} is leased to the direct CDP provider`);
     }
-    keys.push(`target:${tabId}`, `session:${metadata.session}`);
+    if (command !== 'requestHelp') keys.push(`target:${tabId}`, `session:${metadata.session}`);
   } else if (command === 'borrow') {
     keys.push(`target:${tabId}`, `session:${args.session || 'default'}`);
   } else if (command === 'new' || command === 'closeSession') {

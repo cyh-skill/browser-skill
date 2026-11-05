@@ -1605,7 +1605,11 @@ async fn extension_only_timeout(
     timeout: Duration,
 ) -> ApiResult<Value> {
     let target = require_target(params)?;
-    let _guard = acquire_target_guard(state, params).await;
+    let _guard = if command == "requestHelp" {
+        None
+    } else {
+        Some(acquire_target_guard(state, params).await)
+    };
     let managed = ensure_managed_target(state, &target).await?;
     if managed.primary_provider != Provider::Extension {
         return Err(ApiError::Conflict(format!(
