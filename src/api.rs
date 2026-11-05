@@ -1086,12 +1086,13 @@ async fn request_help(
 ) -> ApiResult<impl IntoResponse> {
     let payload: Value =
         serde_json::from_slice(&body).map_err(|error| ApiError::BadRequest(error.to_string()))?;
+    let _help_guard = state.human_help.lock().await;
     extension_only_timeout(
         &state,
         &params,
         "requestHelp",
         payload,
-        Duration::from_secs(600),
+        Duration::from_secs(610),
     )
     .await
     .map(axum::Json)

@@ -52,7 +52,7 @@ curl -s http://127.0.0.1:3456/health
 
 最后重新查询 `/targets?managed=1&session=<name>`、`/net/rules` 和 `/health`，核对分组、页面、规则与 lease。最终回复必须包含一条清理声明：session 归零时报告关闭和归还数量；复用分组时报告 session、分组、保留 target、ownership 和下一步用途；清理失败时报告具体残留及失败原因。
 
-验证码、OTP、登录或重要确认需要用户介入时调用 `/requestHelp` 并等待接管。不得读取或外传密码、Cookie、Token、认证头或密码管理器内容，也不得用暴力重试绕过人工确认。
+验证码、OTP、登录或重要确认需要用户介入时调用 `/requestHelp` 并等待接管；请求会依次排队，轮到时聚焦对应窗口，用户交回、取消、关闭目标或超时后才进入下一项。只有 `continued` 表示用户主动交回，其他结果须按实际情况处理，不得当成操作已完成。不得读取或外传密码、Cookie、Token、认证头或密码管理器内容，也不得用暴力重试绕过人工确认。
 
 ## Provider 路由
 

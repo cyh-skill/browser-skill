@@ -123,6 +123,7 @@ pub struct AppState {
     pub knowledge: KnowledgeStore,
     pub managed: RwLock<HashMap<String, ManagedTarget>>,
     pub queue: OperationQueue,
+    pub human_help: Mutex<()>,
 }
 
 impl AppState {
@@ -136,6 +137,7 @@ impl AppState {
             knowledge,
             managed: RwLock::new(HashMap::new()),
             queue: OperationQueue::default(),
+            human_help: Mutex::new(()),
         })
     }
 

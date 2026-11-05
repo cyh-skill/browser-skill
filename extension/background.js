@@ -589,11 +589,26 @@ async function pressKey(tabId, key) {
 }
 
 async function requestHelp(tabId, args) {
+  const tab = await chrome.tabs.get(tabId);
+  const timeout = Math.min(Math.max(Number(args.timeout) || 300000, 1000), 600000);
+  await chrome.tabs.update(tabId, { active: true });
+  const window = await chrome.windows.get(tab.windowId);
+  await chrome.windows.update(tab.windowId, window.state === 'minimized'
+    ? { state: 'normal', focused: true } : { focused: true });
   const targets = [args.targets ?? args.targetRef].flat().filter(Boolean);
   for (const target of targets) {
     await evalIn(tabId, `(() => {const el=${elementResolverSource(target)};if(!el)return;el.scrollIntoView({block:'center'});el.style.outline='3px solid #f59e0b';el.style.outlineOffset='3px';})()`).catch(() => {});
   }
-  const result = await chrome.scripting.executeScript({
+  let onTabRemoved, onWindowRemoved, timer;
+  const closed = new Promise((resolve) => {
+    onTabRemoved = (id) => { if (id === tabId) resolve({ outcome: 'closed' }); };
+    onWindowRemoved = (id) => { if (id === tab.windowId) resolve({ outcome: 'closed' }); };
+    chrome.tabs.onRemoved.addListener(onTabRemoved);
+    chrome.windows.onRemoved.addListener(onWindowRemoved);
+    timer = setTimeout(() => resolve({ outcome: 'timed_out' }), timeout + 1000);
+  });
+  try {
+    const script = chrome.scripting.executeScript({
     target: { tabId },
     func: (title, prompt, timeout) => new Promise((resolve) => {
       const old = document.getElementById('__cyh_browser_skill_help__'); if (old) old.remove();
@@ -601,13 +616,19 @@ async function requestHelp(tabId, args) {
       panel.style.cssText = 'position:fixed;right:20px;top:20px;z-index:2147483647;width:min(420px,calc(100vw - 40px));background:#fff;color:#111827;border:1px solid #cbd5e1;border-radius:14px;padding:18px;box-shadow:0 18px 60px rgba(0,0,0,.28);font:14px system-ui';
       panel.innerHTML = `<strong style="font-size:17px">${String(title || '需要你的协助').replace(/[<>&]/g, '')}</strong><p style="line-height:1.6">${String(prompt || '').replace(/[<>&]/g, '')}</p><div style="display:flex;justify-content:flex-end;gap:8px"><button data-outcome="cancelled">取消</button><button data-outcome="continued" style="background:#2563eb;color:white;border:0;border-radius:7px;padding:8px 14px">完成并交回 Agent</button></div>`;
       document.documentElement.appendChild(panel);
-      const finish = (outcome) => { panel.remove(); resolve({ outcome }); };
+      let timer;
+      const finish = (outcome) => { clearTimeout(timer); panel.remove(); resolve({ outcome }); };
       panel.addEventListener('click', (event) => { const outcome = event.target?.getAttribute?.('data-outcome'); if (outcome) finish(outcome); });
-      setTimeout(() => finish('timed_out'), timeout);
+      timer = setTimeout(() => finish('timed_out'), timeout);
     }),
-    args: [args.title, args.prompt, Math.min(Number(args.timeout || 300000), 600000)],
-  });
-  return result?.[0]?.result || { outcome: 'cancelled' };
+    args: [args.title, args.prompt, timeout],
+    }).then((result) => result?.[0]?.result || { outcome: 'cancelled' });
+    return await Promise.race([script, closed]);
+  } finally {
+    clearTimeout(timer);
+    chrome.tabs.onRemoved.removeListener(onTabRemoved);
+    chrome.windows.onRemoved.removeListener(onWindowRemoved);
+  }
 }
 
 connect();

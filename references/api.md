@@ -40,7 +40,7 @@
 - `/select`：`{"selector":"@e1","values":["value"]}`。
 - `/press`：`{"key":"Enter"}`；`/scroll` 接受 direction 和 y query。
 - `/emulate`：POST viewport、UA、touch 参数；`{"off":true}` 清除。
-- `/requestHelp`：POST `{"title":"...","prompt":"...","targets":["@e1"],"timeout":300000}`。
+- `/requestHelp`：POST `{"title":"...","prompt":"...","targets":["@e1"],"timeout":300000}`。所有会话的请求依次处理，轮到时激活目标标签并聚焦窗口；用户交回、取消、关闭目标或超时后才处理下一个。超时从轮到该请求时开始计算，默认 5 分钟，可设为 1 秒至 10 分钟；结果的 `outcome` 为 `continued`、`cancelled`、`closed` 或 `timed_out`。
 
 ## CDP 侧车
 
