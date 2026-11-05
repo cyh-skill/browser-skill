@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use axum::{
     Router,
@@ -33,6 +33,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/route", get(route_preview))
         .route("/provider/lease", post(provider_lease))
         .route("/provider/release", post(provider_release))
+        .route("/extension/load-unpacked", post(extension_load_unpacked))
         .route("/targets", get(targets))
         .route("/sessions", get(sessions))
         .route("/new", post(new_target))
@@ -130,6 +131,12 @@ struct Params {
     timeout: Option<u64>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExtensionLoadRequest {
+    path: PathBuf,
+}
+
 #[derive(Debug, Error)]
 enum ApiError {
     #[error("{0}")]
@@ -193,6 +200,51 @@ async fn health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
             "networkIntercept", "fileUpload", "externalKnowledgeStore", "humanLoop"
         ]
     }))
+}
+
+async fn extension_load_unpacked(
+    State(state): State<Arc<AppState>>,
+    axum::Json(request): axum::Json<ExtensionLoadRequest>,
+) -> ApiResult<impl IntoResponse> {
+    if !state.cdp.connected().await {
+        return Err(ApiError::Unavailable(
+            "CDP provider is not connected".into(),
+        ));
+    }
+
+    let path = request.path.canonicalize().map_err(|error| {
+        ApiError::BadRequest(format!(
+            "cannot resolve extension directory {}: {error}",
+            request.path.display()
+        ))
+    })?;
+    if !path.is_dir() {
+        return Err(ApiError::BadRequest(format!(
+            "extension path is not a directory: {}",
+            path.display()
+        )));
+    }
+    if !path.join("manifest.json").is_file() {
+        return Err(ApiError::BadRequest(format!(
+            "extension directory has no manifest.json: {}",
+            path.display()
+        )));
+    }
+
+    let path = path
+        .to_str()
+        .ok_or_else(|| ApiError::BadRequest("extension path is not valid UTF-8".into()))?;
+    let result = state
+        .cdp
+        .call("Extensions.loadUnpacked", json!({ "path": path }), None)
+        .await
+        .map_err(ApiError::internal)?;
+
+    Ok(axum::Json(json!({
+        "path": path,
+        "extensionId": result.get("id"),
+        "result": result
+    })))
 }
 
 async fn route_preview(
