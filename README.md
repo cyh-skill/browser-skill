@@ -15,7 +15,7 @@ Codex / Claude Code ── HTTP ──> Rust Runtime (:3456)
 
 ## 安装
 
-本仓库以 Codex 为当前优先入口：指令入口为 `SKILL.md`，界面元数据为 `agents/openai.yaml`。将仓库目录安装或链接为 `~/.agents/skills/cyh-browser-skill` 后，重新启动 Codex 会话以加载 Skill。Claude Code 兼容元数据保留在 `.claude-plugin/`，个人 Skill 使用 `/cyh-browser-skill`，插件安装使用 `/browser-skill:cyh-browser-skill`；两个入口共享相同的 `SKILL.md`、Runtime、扩展和安全边界。
+本仓库以 Codex 为当前优先入口：指令入口为 `SKILL.md`，界面元数据为 `agents/openai.yaml`。将仓库目录安装或链接为 `~/.agents/skills/cyh-browser-skill` 后，重新启动 Codex 会话以加载 Skill。Claude Code 可将仓库目录链接为 `~/.claude/skills/cyh-browser-skill`，或通过插件安装（`/plugin marketplace add cyh-skill/browser-skill` 后 `/plugin install browser-skill@browser-skill`）；个人 Skill 使用 `/cyh-browser-skill`，插件安装使用 `/browser-skill:cyh-browser-skill`；两个入口共享相同的 `SKILL.md`、Runtime、扩展和安全边界。
 
 随后安装本地 Runtime。当前公开仓库尚未发布 `runtime-v2.0.0` 预编译资产，首次安装需使用 Rust stable/Cargo 从源码构建：
 
